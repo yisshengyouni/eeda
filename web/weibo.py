@@ -9,6 +9,7 @@ from flask import Flask
 from flask import render_template
 from flask import request, jsonify
 import datetime
+from dateutil import parser
 from sqlalchemy.orm import declarative_base
 import sqlalchemy as db
 
@@ -262,7 +263,9 @@ def parse_time(create_at):
         app.logger.debug(res)
         return res
 
-    create_at = datetime.strptime(create_at, "%Y-%m-%d %H:%M:%S")
+    if create_at.find('+0800') > 0:
+        f_date = parser.parse(create_at)
+        return f_date.strftime('%Y-%m-%d %H:%M:%S')
     return create_at
 
 
@@ -339,3 +342,4 @@ if __name__ == '__main__':
     # parse_time("02-10")
 
     app.run(host="0.0.0.0", port=os.getenv("PORT", default=5050), debug=True)
+
