@@ -48,6 +48,7 @@ engine = db.create_engine("postgresql://user:password@localhost/database")
 
 Base = declarative_base()
 
+page_cache = {}
 
 def renderResultJson(data, success=True, message=''):
     obj = {}
@@ -137,8 +138,14 @@ def add_wx_user():
 
 @app.route('/<page>')
 def hello(page):
-    print('get weibo')
-    data = get_weibo(page);
+    print('get weibo, page -> ', page)
+    data = []
+    if page_cache.get(page):
+        data = page_cache.get(page)
+    else:
+        data = get_weibo(page)
+        if data:
+            page_cache[page] = data
     return jsonify({'success': True, 'data': data, 'message': 'suc'})
 
 
