@@ -191,6 +191,15 @@ def parse_page(json):
             weibo['comments'] = item.get('comments_count')
             weibo['reposts'] = item.get('reposts_count')
             weibo['original_pic'] = item.get('original_pic')
+            pics = item.get('pics')
+            pics_data = []
+            if pics:
+                for pic in pics:
+                    pic_data = {}
+                    pic_data['url'] = pic.get('url')
+                    pic_data['large_url'] = pic.get('large').get('url')
+                    pics_data.append(pic_data)
+            weibo['pics'] = pics_data
 
             weibo['created_at'] = parse_time(item.get('created_at'))
 
