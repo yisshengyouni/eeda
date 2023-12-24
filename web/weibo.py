@@ -50,6 +50,7 @@ Base = declarative_base()
 
 page_cache = {}
 
+
 def renderResultJson(data, success=True, message=''):
     obj = {}
     if data is not None:
@@ -156,6 +157,7 @@ def get_page(page):
         # url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value=5687069307&containerid=1076035687069307&page='
         url += str(page)
         print('url:  ', url)
+        app.logger.info('url : %s ', url)
         response = requests.get(url, headers=headers)
         # print(response.text)
         if response.status_code == 200:
@@ -189,6 +191,8 @@ def parse_page(json):
             item = item.get('mblog')
 
             print("item: ", item)
+            if item is None:
+                continue
 
             weibo = {}
             weibo['id'] = item.get('id')
@@ -251,7 +255,6 @@ def parse_time(create_at):
         res = n_now.strftime('%Y-%m-%d %H:%M:%S')
         app.logger.debug(res)
         return res
-
 
     hours_index = create_at.find('小时前')
     # print("hours_index : ", hours_index)
@@ -361,4 +364,3 @@ if __name__ == '__main__':
     # parse_time("02-10")
 
     app.run(host="0.0.0.0", port=os.getenv("PORT", default=5050), debug=True)
-
