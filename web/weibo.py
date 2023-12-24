@@ -151,7 +151,9 @@ def hello(page):
 
 def get_page(page):
     try:
-        url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value=5687069307&containerid=1076035687069307&page='
+        container = '2304137519797263'
+        url = 'https://m.weibo.cn/api/container/getIndex?containerid=' + container + '-_WEIBO_SECOND_PROFILE_WEIBO&page_type=03&page='
+        # url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value=5687069307&containerid=1076035687069307&page='
         url += str(page)
         response = requests.get(url, headers=headers)
         # print(response.text)
@@ -168,7 +170,7 @@ def get_detail(id):
         url = 'https://m.weibo.cn/statuses/extend?id='
         url += str(id)
         response = requests.get(url, headers=headers)
-        # print(response.text)
+        print('detail --> ', response.text)
         if response.status_code == 200:
             # print(response.json())
             return response.json().get('data').get('longTextContent')
