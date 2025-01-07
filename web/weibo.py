@@ -141,12 +141,15 @@ def add_wx_user():
 def hello(page):
     print('get weibo, page -> ', page)
     data = []
-    if page_cache.get(page):
-        data = page_cache.get(page)
-    else:
-        data = get_weibo(page)
-        if data:
-            page_cache[page] = data
+    # 异步请求，并设置超时时间，如果超过超时时间，则使用缓存中的数据返回
+    data = get_weibo(page)
+    
+    # if page_cache.get(page):
+    #     data = page_cache.get(page)
+    # else:
+    #     data = get_weibo(page)
+    #     if data:
+    #         page_cache[page] = data
     return jsonify({'success': True, 'data': data, 'message': 'suc'})
 
 
