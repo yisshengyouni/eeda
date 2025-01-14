@@ -137,12 +137,13 @@ def add_wx_user():
     return renderResultJson(None)
 
 
-@app.route('/<page>')
-def hello(page):
+@app.route('/<page>/<prefix>/<uid>')
+def hello(page, prefix='230413', uid='7519797263'):
     print('get weibo, page -> ', page)
     data = []
     # 异步请求，并设置超时时间，如果超过超时时间，则使用缓存中的数据返回
-    data = get_weibo(page)
+    containerid = prefix + uid
+    data = get_weibo(page, containerid)
     
     # if page_cache.get(page):
     #     data = page_cache.get(page)
@@ -152,11 +153,24 @@ def hello(page):
     #         page_cache[page] = data
     return jsonify({'success': True, 'data': data, 'message': 'suc'})
 
-
-def get_page(page):
+@app.route('/get_weibo_buyer/<uid>')
+def get_weibo_buyer(uid):
     try:
-        container = '2304137519797263'
-        url = 'https://m.weibo.cn/api/container/getIndex?containerid=' + container + '_-_WEIBO_SECOND_PROFILE_WEIBO&page_type=03&page='
+        url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value='+uid
+        response = requests.ge(url, headers=headers)
+        res_json = response.json()
+        return {'desc': res_json.get('data').get('userInfo').get('description'),
+                'screen_name': res_json.get('data').get('userInfo').get('screen_name'),
+                'profile_image_url': res_json.get('data').get('userInfo').get('profile_image_url')}
+    except Exception as e:
+        return None
+
+def get_page(page, containerid):
+    try:
+        if containerid is None:
+            # 默认
+            containerid = '2304137519797263'
+        url = 'https://m.weibo.cn/api/container/getIndex?containerid=' + containerid + '_-_WEIBO_SECOND_PROFILE_WEIBO&page_type=03&page='
         # url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value=5687069307&containerid=1076035687069307&page='
         url += str(page)
         print('url:  ', url)
@@ -244,8 +258,8 @@ def parse_page(json):
             yield weibo
 
 
-def get_weibo(page):
-    json = get_page(page)
+def get_weibo(page, containerid):
+    json = get_page(page, containerid)
     result = parse_page(json)
     weibo = []
     for res in result:
