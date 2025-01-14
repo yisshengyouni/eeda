@@ -137,6 +137,8 @@ def add_wx_user():
     return renderResultJson(None)
 
 
+@app.route('/<page>')
+@app.route('/<page>/<prefix>')
 @app.route('/<page>/<prefix>/<uid>')
 def hello(page, prefix='230413', uid='7519797263'):
     print('get weibo, page -> ', page)
