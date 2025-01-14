@@ -191,7 +191,16 @@ def parse_page(json):
     if json:
         items = json.get('data').get('cards')
         for index, item in enumerate(items):
-            item = item.get('mblog')
+            # 特殊的卡片
+            card_group = item.get('card_group')
+            if card_group is not None:
+                for card in card_group:
+                    item = card.get('mblog')
+                    print("item: ", item)
+                    if item is None:
+                        continue
+            else:
+                item = item.get('mblog')
 
             print("item: ", item)
             if item is None:
