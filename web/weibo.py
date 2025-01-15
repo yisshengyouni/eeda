@@ -77,7 +77,8 @@ class SQLAlchemyEncoder(json.JSONEncoder):
                 try:
                     if isinstance(data, datetime.datetime):
                         data = data.strftime('%Y-%m-%d %H:%M:%S')
-                    json.dumps(data)  # this will fail on non-encodable values, like other classes
+                    # this will fail on non-encodable values, like other classes
+                    json.dumps(data)
                     fields[field] = data
                 except TypeError as e:
                     print('parse json error field: %s', field)
@@ -105,7 +106,7 @@ class WxUserInfo(Base):
 
 @app.route('/get_wx_user')
 def get_wx_user():
-    return renderResultJson(WxUserInfo.query.all());
+    return renderResultJson(WxUserInfo.query.all())
 
 
 # 添加微信openId
@@ -146,7 +147,7 @@ def hello(page, prefix='230413', uid='7519797263'):
     # 异步请求，并设置超时时间，如果超过超时时间，则使用缓存中的数据返回
     containerid = prefix + uid
     data = get_weibo(page, containerid)
-    
+
     # if page_cache.get(page):
     #     data = page_cache.get(page)
     # else:
@@ -155,24 +156,29 @@ def hello(page, prefix='230413', uid='7519797263'):
     #         page_cache[page] = data
     return jsonify({'success': True, 'data': data, 'message': 'suc'})
 
+
 @app.route('/get_weibo_buyer/<uid>')
 def get_weibo_buyer(uid):
     try:
         url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value='+uid
         response = requests.ge(url, headers=headers)
+        app.logger.info(response)
         res_json = response.json()
         return {'desc': res_json.get('data').get('userInfo').get('description'),
                 'screen_name': res_json.get('data').get('userInfo').get('screen_name'),
                 'profile_image_url': res_json.get('data').get('userInfo').get('profile_image_url')}
     except Exception as e:
-        return None
+        app.logger.error(e)
+        return {'desc': '', 'screen_name': '', 'profile_image_url': ''}
+
 
 def get_page(page, containerid):
     try:
         if containerid is None:
             # 默认
             containerid = '2304137519797263'
-        url = 'https://m.weibo.cn/api/container/getIndex?containerid=' + containerid + '_-_WEIBO_SECOND_PROFILE_WEIBO&page_type=03&page='
+        url = 'https://m.weibo.cn/api/container/getIndex?containerid=' + \
+            containerid + '_-_WEIBO_SECOND_PROFILE_WEIBO&page_type=03&page='
         # url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value=5687069307&containerid=1076035687069307&page='
         url += str(page)
         print('url:  ', url)
@@ -228,6 +234,10 @@ def parse_page(json):
                 weibo['text'] = pq(item.get('text').strip()).text()
             else:
                 weibo['text'] = ''
+
+            if weibo['text'] == '':
+                continue
+
             # .replace('<br />', '\\n')
             weibo['attitudes'] = item.get('attitudes_count')
             weibo['comments'] = item.get('comments_count')
@@ -337,7 +347,8 @@ def get_wechat_token():
     print("token产生时间(s): ", seconds)
     if wechat_token["token"] == "" or seconds > wechat_token["expire"]:
         # 请求获取 token
-        url = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=" + APP_ID + "&secret=" + SECRET + ""
+        url = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=" + \
+            APP_ID + "&secret=" + SECRET + ""
         response = requests.get(url)
         if response.status_code == 200:
             json = response.json()
@@ -365,7 +376,7 @@ def send_wechat_msg():
 @app.route('/send_msg/<openid>-<con>')
 def send_singe_msg(openid, con):
     token = get_wechat_token()
-    url = 'https://api.weixin.qq.com/cgi-bin/message/subscribe/send?access_token=' + token;
+    url = 'https://api.weixin.qq.com/cgi-bin/message/subscribe/send?access_token=' + token
     now = datetime.datetime.now().strftime('%Y年%m月%d日 %H:%M')
     data = {'date2': {'value': now},
             'thing1': {'value': con},
