@@ -166,7 +166,10 @@ def get_weibo_buyer(uid):
         res_json = response.json()
         return {'desc': res_json.get('data').get('userInfo').get('description'),
                 'screen_name': res_json.get('data').get('userInfo').get('screen_name'),
-                'profile_image_url': res_json.get('data').get('userInfo').get('profile_image_url')}
+                'profile_image_url': res_json.get('data').get('userInfo').get('profile_image_url'),
+                'following': res_json.get('data').get('userInfo').get('follow_count'),
+                'followers': res_json.get('data').get('userInfo').get('followers_count'),
+                'statuses_count': res_json.get('data').get('userInfo').get('statuses_count')}
     except Exception as e:
         app.logger.error(e)
         return {'desc': '', 'screen_name': '', 'profile_image_url': ''}
