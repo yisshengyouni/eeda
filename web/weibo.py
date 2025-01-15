@@ -161,7 +161,7 @@ def hello(page, prefix='230413', uid='7519797263'):
 def get_weibo_buyer(uid):
     try:
         url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value='+uid
-        response = requests.ge(url, headers=headers)
+        response = requests.get(url, headers=headers)
         app.logger.info(response)
         res_json = response.json()
         return {'desc': res_json.get('data').get('userInfo').get('description'),
