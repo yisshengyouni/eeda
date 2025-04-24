@@ -195,6 +195,7 @@ def get_page(page, containerid):
         print('Error', e.args)
 
 
+@app.route('/get_detail/<id>')
 def get_detail(id):
     try:
         # 展开全文
@@ -208,6 +209,22 @@ def get_detail(id):
             # .replace('<br />', '\\n')
     except requests.ConnectionError as e:
         print('Error', e.args)
+
+
+# 获取评论
+@app.route('/get_comment/<id>')
+def get_comment(id):
+    try:
+        # 展开全文
+        url = 'https://m.weibo.cn/comments/hotflow?id='+str(id)+'&mid='+str(id)+'&max_id_type=0'
+        response = requests.get(url, headers=headers)
+        # print('comment --> ', response.text)
+        if response.status_code == 200:
+            # print(response.json())
+            return response.json().get('data').get('data')
+    except requests.ConnectionError as e:
+        print('Error', e.args)
+    return []
 
 
 # 解析数据
@@ -268,7 +285,9 @@ def parse_page(json):
             # weibo.append(item.get('original_pic'))
             # 遇见重复数据，pass，是根据主键来判断，如果是重复数据，忽略，但是报警告
             # print(weibo)
-            if weibo['text'].endswith('...全文'):
+            
+            # 置顶的微博不自动展开
+            if weibo['text'].endswith('...全文') and item.get('isTop')!=1:
                 weibo['text'] = get_detail(weibo['id'])
             yield weibo
 
