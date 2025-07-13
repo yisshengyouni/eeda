@@ -205,7 +205,7 @@ def get_detail(id):
         print('detail --> ', response.text)
         if response.status_code == 200:
             # print(response.json())
-            return response.json().get('data').get('longTextContent')
+            return response.json().get('data')
             # .replace('<br />', '\\n')
     except requests.ConnectionError as e:
         print('Error', e.args)
