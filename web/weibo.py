@@ -4,6 +4,8 @@ from logging import Formatter
 import logging
 import os
 import requests
+import asyncio
+import aiohttp
 from pyquery import PyQuery as pq
 from flask import Flask
 from flask import render_template
@@ -144,16 +146,10 @@ def add_wx_user():
 def hello(page, prefix='230413', uid='7519797263'):
     print('get weibo, page -> ', page)
     data = []
-    # 异步请求，并设置超时时间，如果超过超时时间，则使用缓存中的数据返回
+    # 使用异步请求获取微博数据，支持超时处理和缓存机制
     containerid = prefix + uid
     data = get_weibo(page, containerid)
-
-    # if page_cache.get(page):
-    #     data = page_cache.get(page)
-    # else:
-    #     data = get_weibo(page)
-    #     if data:
-    #         page_cache[page] = data
+    
     return jsonify({'success': True, 'data': data, 'message': 'suc'})
 
 
@@ -161,7 +157,8 @@ def hello(page, prefix='230413', uid='7519797263'):
 def get_weibo_buyer(uid):
     try:
         url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value='+uid
-        response = requests.get(url, headers=headers)
+        # 添加超时设置
+        response = requests.get(url, headers=headers, timeout=10)
         app.logger.info(response)
         res_json = response.json()
         return {'desc': res_json.get('data').get('userInfo').get('description'),
@@ -170,29 +167,67 @@ def get_weibo_buyer(uid):
                 'following': res_json.get('data').get('userInfo').get('follow_count'),
                 'followers': res_json.get('data').get('userInfo').get('followers_count'),
                 'statuses_count': res_json.get('data').get('userInfo').get('statuses_count')}
-    except Exception as e:
+    except (requests.ConnectionError, requests.Timeout, Exception) as e:
         app.logger.error(e)
         return {'desc': '', 'screen_name': '', 'profile_image_url': ''}
 
 
-def get_page(page, containerid):
+async def get_page_async(page, containerid, timeout=10):
+    """异步获取页面数据，支持超时和缓存机制"""
     try:
         if containerid is None:
             # 默认
             containerid = '2304137519797263'
         url = 'https://m.weibo.cn/api/container/getIndex?containerid=' + \
             containerid + '_-_WEIBO_SECOND_PROFILE_WEIBO&page_type=03&page='
-        # url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value=5687069307&containerid=1076035687069307&page='
         url += str(page)
         print('url:  ', url)
         app.logger.info('url : %s ', url)
-        response = requests.get(url, headers=headers)
-        # print(response.text)
-        if response.status_code == 200:
-            # print(response.json())
-            return response.json()
-    except requests.ConnectionError as e:
-        print('Error', e.args)
+        
+        # 异步请求，并设置超时时间
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    json_data = await response.json()
+                    # 将成功获取的数据存入缓存
+                    cache_key = f"page_{page}_{containerid}"
+                    page_cache[cache_key] = json_data
+                    return json_data
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        print('Async Request Error:', str(e))
+        # 请求失败或超时时，尝试从缓存中获取数据
+        cache_key = f"page_{page}_{containerid}"
+        if cache_key in page_cache:
+            print('Using cached data due to request timeout/error')
+            app.logger.warning('Using cached data for page %s, containerid %s due to request error', page, containerid)
+            return page_cache[cache_key]
+        else:
+            print('No cached data available')
+            app.logger.error('No cached data available for page %s, containerid %s', page, containerid)
+            return None
+
+def get_page(page, containerid, timeout=10):
+    """同步版本的get_page，内部调用异步版本"""
+    try:
+        # 在新的事件循环中运行异步函数
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(get_page_async(page, containerid, timeout))
+        finally:
+            loop.close()
+    except Exception as e:
+        print('Error in get_page:', str(e))
+        # 发生错误时，尝试从缓存中获取数据
+        cache_key = f"page_{page}_{containerid}"
+        if cache_key in page_cache:
+            print('Using cached data due to error')
+            app.logger.warning('Using cached data for page %s, containerid %s due to error', page, containerid)
+            return page_cache[cache_key]
+        else:
+            print('No cached data available')
+            app.logger.error('No cached data available for page %s, containerid %s', page, containerid)
+            return None
 
 
 @app.route('/get_detail/<id>')
@@ -201,13 +236,17 @@ def get_detail(id):
         # 展开全文
         url = 'https://m.weibo.cn/statuses/extend?id='
         url += str(id)
-        response = requests.get(url, headers=headers)
+        weibo = page_cache.get(str(id))
+        # 添加超时设置
+        response = requests.get(url, headers=headers, timeout=10)
         print('detail --> ', response.text)
         if response.status_code == 200:
             # print(response.json())
-            return response.json().get('data')
+            # 合并weibo和response.json().get('data')数据
+            weibo = weibo.update(response.json().get('data'))
+            return weibo
             # .replace('<br />', '\\n')
-    except requests.ConnectionError as e:
+    except (requests.ConnectionError, requests.Timeout) as e:
         print('Error', e.args)
 
 
@@ -217,12 +256,13 @@ def get_comment(id):
     try:
         # 展开全文
         url = 'https://m.weibo.cn/comments/hotflow?id='+str(id)+'&mid='+str(id)+'&max_id_type=0'
-        response = requests.get(url, headers=headers)
+        # 添加超时设置
+        response = requests.get(url, headers=headers, timeout=10)
         # print('comment --> ', response.text)
         if response.status_code == 200:
             # print(response.json())
             return response.json().get('data').get('data')
-    except requests.ConnectionError as e:
+    except (requests.ConnectionError, requests.Timeout) as e:
         print('Error', e.args)
     return []
 
@@ -294,9 +334,15 @@ def parse_page(json):
 
 def get_weibo(page, containerid):
     json = get_page(page, containerid)
+    if json is None:
+        # 如果获取页面数据失败且没有缓存，返回空列表
+        return []
+    
     result = parse_page(json)
     weibo = []
     for res in result:
+        # 修复：使用字典赋值而不是set方法
+        page_cache[res['id']] = res
         weibo.append(res)
     return weibo
 
@@ -371,13 +417,17 @@ def get_wechat_token():
         # 请求获取 token
         url = "https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=" + \
             APP_ID + "&secret=" + SECRET + ""
-        response = requests.get(url)
-        if response.status_code == 200:
-            json = response.json()
-            print('token: ', json)
-            wechat_token["token"] = json.get("access_token")
-            wechat_token["expire"] = json.get("expires_in")
-            wechat_token["edit_at"] = datetime.datetime.now()
+        try:
+            # 添加超时设置
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                json = response.json()
+                print('token: ', json)
+                wechat_token["token"] = json.get("access_token")
+                wechat_token["expire"] = json.get("expires_in")
+                wechat_token["edit_at"] = datetime.datetime.now()
+        except (requests.ConnectionError, requests.Timeout) as e:
+            print('Error getting wechat token:', e.args)
     return wechat_token["token"]
 
 
@@ -385,10 +435,15 @@ def get_openid(code):
     url = "https://api.weixin.qq.com/sns/jscode2session?appid=" + APP_ID + "&secret=" + SECRET + "&js_code=" + str(
         code) + "&grant_type=authorization_code"
     print('get_openid  url :', url)
-    resp = requests.get(url)
-    json = resp.json()
-    print(json)
-    return json.get('openid')
+    try:
+        # 添加超时设置
+        resp = requests.get(url, timeout=10)
+        json = resp.json()
+        print(json)
+        return json.get('openid')
+    except (requests.ConnectionError, requests.Timeout) as e:
+        print('Error getting openid:', e.args)
+        return None
 
 
 def send_wechat_msg():
@@ -409,11 +464,12 @@ def send_singe_msg(openid, con):
                  'miniprogram_state': 'trial'}
     try:
         print(temp_data)
-        resp = requests.post(url, json=temp_data)
+        # 添加超时设置
+        resp = requests.post(url, json=temp_data, timeout=10)
         json = resp.json()
         print('send msg result: ', json)
         return renderResultJson(json)
-    except RuntimeError as e:
+    except (requests.ConnectionError, requests.Timeout, RuntimeError) as e:
         print('send msg error: ', e)
 
     return renderResultJson(None)
