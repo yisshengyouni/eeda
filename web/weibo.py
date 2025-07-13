@@ -229,6 +229,21 @@ def get_page(page, containerid, timeout=10):
             app.logger.error('No cached data available for page %s, containerid %s', page, containerid)
             return None
 
+def get_extend(id):
+    try:
+        # 展开全文
+        url = 'https://m.weibo.cn/statuses/extend?id='
+        url += str(id)
+        # 添加超时设置
+        response = requests.get(url, headers=headers, timeout=10)
+        print('detail --> ', response.text)
+        if response.status_code == 200:
+            # print(response.json())
+            # 合并weibo和response.json().get('data')数据
+            return response.json().get('data')
+    except (requests.ConnectionError, requests.Timeout) as e:
+        print('Error', e.args)
+
 
 @app.route('/get_detail/<id>')
 def get_detail(id):
@@ -331,7 +346,7 @@ def parse_page(json):
             # 置顶的微博不自动展开
             page_cache[str(weibo['id'])] = weibo
             if weibo['text'].endswith('...全文') and item.get('isTop')!=1:
-                weibo['text'] = get_detail(weibo['id']).get('longTextContent')
+                weibo['text'] = get_extend(weibo['id']).get('longTextContent')
             yield weibo
 
 
