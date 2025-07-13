@@ -236,10 +236,8 @@ def get_extend(id):
         url += str(id)
         # 添加超时设置
         response = requests.get(url, headers=headers, timeout=10)
-        print('detail --> ', response.text)
+        print('get_extend --> ', response.text)
         if response.status_code == 200:
-            # print(response.json())
-            # 合并weibo和response.json().get('data')数据
             return response.json().get('data')
     except (requests.ConnectionError, requests.Timeout) as e:
         print('Error', e.args)
@@ -342,7 +340,7 @@ def parse_page(json):
             weibo['created_at'] = parse_time(item.get('created_at'))
             # 置顶的微博不自动展开
             if weibo['text'].endswith('...全文') and item.get('isTop')!=1:
-                detail_data = get_detail(weibo['id'])
+                detail_data = get_extend(weibo['id'])
                 if detail_data and detail_data.get('longTextContent'):
                     weibo['text'] = detail_data.get('longTextContent')
             yield weibo
