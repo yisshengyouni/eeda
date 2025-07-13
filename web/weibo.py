@@ -253,7 +253,12 @@ def get_detail(id):
         url += str(id)
         weibo = page_cache.get(str(id))
         if weibo is not None:
-            return weibo
+            print('从缓存中获取weibo详情, ', weibo)
+            if weibo['text'].endswith('...全文') :
+                if weibo.get('longTextContent') is not None:
+                    return weibo    
+            else:
+                return weibo
         else:
             weibo = {}
         # 添加超时设置
@@ -352,7 +357,6 @@ def get_weibo(page, containerid):
     result = parse_page(json)
     weibo = []
     for res in result:
-        # 修复：使用正确的变量名
         page_cache[str(res['id'])] = res
         weibo.append(res)
     return weibo
