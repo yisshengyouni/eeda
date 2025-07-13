@@ -288,7 +288,7 @@ def parse_page(json):
             
             # 置顶的微博不自动展开
             if weibo['text'].endswith('...全文') and item.get('isTop')!=1:
-                weibo['text'] = get_detail(weibo['id'])
+                weibo['text'] = get_detail(weibo['id']).get('longTextContent')
             yield weibo
 
 
