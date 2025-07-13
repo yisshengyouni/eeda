@@ -252,7 +252,9 @@ def get_detail(id):
         url = 'https://m.weibo.cn/statuses/extend?id='
         url += str(id)
         weibo = page_cache.get(str(id))
-        if weibo is None:
+        if weibo is not None:
+            return weibo
+        else:
             weibo = {}
         # 添加超时设置
         response = requests.get(url, headers=headers, timeout=10)
@@ -331,20 +333,7 @@ def parse_page(json):
             weibo['pics'] = pics_data
 
             weibo['created_at'] = parse_time(item.get('created_at'))
-
-            # weibo = []
-            # weibo.append(item.get('id'))
-            # weibo.append(pq(item.get('text')).text())
-            # weibo.append(item.get('attitudes_count'))
-            # weibo.append(item.get('comments_count'))
-            # weibo.append(item.get('reposts_count'))
-            # # 发出的图片
-            # weibo.append(item.get('original_pic'))
-            # 遇见重复数据，pass，是根据主键来判断，如果是重复数据，忽略，但是报警告
-            # print(weibo)
-            
             # 置顶的微博不自动展开
-            page_cache[str(weibo['id'])] = weibo
             if weibo['text'].endswith('...全文') and item.get('isTop')!=1:
                 weibo['text'] = get_extend(weibo['id']).get('longTextContent')
             yield weibo
@@ -359,6 +348,7 @@ def get_weibo(page, containerid):
     result = parse_page(json)
     weibo = []
     for res in result:
+        page_cache[str(weibo['id'])] = res
         weibo.append(res)
     return weibo
 
