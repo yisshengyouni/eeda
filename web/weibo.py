@@ -237,6 +237,8 @@ def get_detail(id):
         url = 'https://m.weibo.cn/statuses/extend?id='
         url += str(id)
         weibo = page_cache.get(str(id))
+        if weibo is None:
+            weibo = {}
         # 添加超时设置
         response = requests.get(url, headers=headers, timeout=10)
         print('detail --> ', response.text)
@@ -327,6 +329,7 @@ def parse_page(json):
             # print(weibo)
             
             # 置顶的微博不自动展开
+            page_cache[str(weibo['id'])] = weibo
             if weibo['text'].endswith('...全文') and item.get('isTop')!=1:
                 weibo['text'] = get_detail(weibo['id']).get('longTextContent')
             yield weibo
@@ -341,8 +344,6 @@ def get_weibo(page, containerid):
     result = parse_page(json)
     weibo = []
     for res in result:
-        # 修复：使用字典赋值而不是set方法
-        page_cache[res['id']] = res
         weibo.append(res)
     return weibo
 
