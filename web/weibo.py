@@ -130,7 +130,7 @@ def add_wx_user():
         return renderResultJson(None, success=False, message='获取openid失败')
 
     # 校验openid是否已经存在
-    user_info = WxUserInfo.query.filter_by(open_id=openid).first()
+    user_info = db.session.query(WxUserInfo).filter_by(open_id=openid).first()
     if user_info is not None:
         return renderResultJson(None, success=False, message='openid已存在')
     now = datetime.datetime.now()
@@ -262,11 +262,13 @@ def get_detail(id):
         if response.status_code == 200:
             # print(response.json())
             # 合并weibo和response.json().get('data')数据
-            weibo = weibo.update(response.json().get('data'))
+            data = response.json().get('data')
+            if data:
+                weibo.update(data)
             return weibo
-            # .replace('<br />', '\\n')
     except (requests.ConnectionError, requests.Timeout) as e:
         print('Error', e.args)
+    return {}
 
 
 # 获取评论
@@ -335,7 +337,9 @@ def parse_page(json):
             weibo['created_at'] = parse_time(item.get('created_at'))
             # 置顶的微博不自动展开
             if weibo['text'].endswith('...全文') and item.get('isTop')!=1:
-                weibo['text'] = get_extend(weibo['id']).get('longTextContent')
+                detail_data = get_detail(weibo['id'])
+                if detail_data and detail_data.get('longTextContent'):
+                    weibo['text'] = detail_data.get('longTextContent')
             yield weibo
 
 
@@ -348,7 +352,8 @@ def get_weibo(page, containerid):
     result = parse_page(json)
     weibo = []
     for res in result:
-        page_cache[str(weibo['id'])] = res
+        # 修复：使用正确的变量名
+        page_cache[str(res['id'])] = res
         weibo.append(res)
     return weibo
 
