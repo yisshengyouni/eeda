@@ -32,8 +32,8 @@ class WeiboCache:
                     data = json.load(f)
                 with self._lock:
                     for key, (value, timestamp) in data.items():
-if time.time() - timestamp < self.ttl:
-    self._store[key] = (value, timestamp)
+                        if time.time() - timestamp < self.ttl:
+                            self._store[key] = (value, timestamp)
                 logger.info('Loaded %s cache entries from %s', len(self._store), self.cache_file)
             except Exception as e:
                 logger.error('Failed to load cache file: %s', e)
@@ -157,7 +157,7 @@ def parse_page(json_data):
                 if mblog:
                     parsed = _parse_mblog(mblog)
                     if parsed:
-result.append(parsed)
+                        result.append(parsed)
         else:
             mblog = item.get('mblog')
             if mblog:
