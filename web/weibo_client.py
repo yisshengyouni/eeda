@@ -13,10 +13,10 @@ DEFAULT_TTL = 300  # 5 minutes
 SAVE_INTERVAL = 60
 
 WEIBO_COOKIE="""
-    SUB=_2A25E2-CVDeRhGeRL71QY9ibLzzyIHXVnmXxdrDV6PUJbktAYLXTgkW1NUyyu4H7sS8QhjRzfCCKj8tkEJcDwNz8R;                                                                      
-  SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9W5mOVdIgk9nQ8GnIQwriW3T5NHD95QESKBc1KqRS0B7Ws4Dqcjci--fiK.7iKn0i--NiK.0iKLhi--Ni-i8i-2Xi--Xi-ihiK.Ni--fiK.pi-2Ri--NiK.piKLh;                        
-  SCF=ArnADx7wqr8O_ahdWyjjYPav5ugcQGTuhBAZ6n-f0dxsRtdmaNCAV4C84JUg4PskYOhU-sWqddsVGQxmFVzhIZw.; SSOLoginState=1776259269; ALF=1778851269; MLOGIN=1; _T_WM=61011888518; XSRF-TOKEN=1c374d;   
-  M_WEIBOCN_PARAMS=uicode%3D20000174;                                                                                                                                                       
+SUB=_2A25E2-CVDeRhGeRL71QY9ibLzzyIHXVnmXxdrDV6PUJbktAYLXTgkW1NUyyu4H7sS8QhjRzfCCKj8tkEJcDwNz8R;
+  SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9W5mOVdIgk9nQ8GnIQwriW3T5NHD95QESKBc1KqRS0B7Ws4Dqcjci--fiK.7iKn0i--NiK.0iKLhi--Ni-i8i-2Xi--Xi-ihiK.Ni--fiK.pi-2Ri--NiK.piKLh;
+  SCF=ArnADx7wqr8O_ahdWyjjYPav5ugcQGTuhBAZ6n-f0dxsRtdmaNCAV4C84JUg4PskYOhU-sWqddsVGQxmFVzhIZw.; SSOLoginState=1776259269; ALF=1778851269; MLOGIN=1; _T_WM=61011888518; XSRF-TOKEN=1c374d;
+  M_WEIBOCN_PARAMS=uicode%3D20000174;
   WBPSESS=37cCvaJpVHXbfW7WW2gsD8Qnsm1jAfPFv5IrcMR-9_2LhGr91DDnp7mdoQCTDPVanPp9HFWPPBcVaCjW76Np9YXTqM__bJRCNlTGnqY4Bxu0IavRGXMhKP6b05HABu56wt64xrnVIziwEx9DvE222g=="""
                    
 
@@ -37,8 +37,8 @@ class WeiboCache:
                     data = json.load(f)
                 with self._lock:
                     for key, (value, timestamp) in data.items():
-                        if time.time() - timestamp < self.ttl:
-                            self._store[key] = (value, timestamp)
+if time.time() - timestamp < self.ttl:
+    self._store[key] = (value, timestamp)
                 logger.info('Loaded %s cache entries from %s', len(self._store), self.cache_file)
             except Exception as e:
                 logger.error('Failed to load cache file: %s', e)
@@ -162,7 +162,7 @@ def parse_page(json_data):
                 if mblog:
                     parsed = _parse_mblog(mblog)
                     if parsed:
-                        result.append(parsed)
+result.append(parsed)
         else:
             mblog = item.get('mblog')
             if mblog:
@@ -238,13 +238,13 @@ class WeiboClient:
         try:
             resp = self.session.get(url, headers=self._request_headers(), timeout=timeout)
             logger.debug('Response status %s for %s, content-length: %s',
-                         resp.status_code, url, resp.headers.get('Content-Length'))
+ resp.status_code, url, resp.headers.get('Content-Length'))
             if resp.status_code == 200:
                 data = resp.json()
                 logger.debug('Response OK, keys: %s', list(data.keys()) if isinstance(data, dict) else 'non-dict')
                 return data
             logger.warning('Non-200 status %s for %s, body snippet: %.200s',
-                           resp.status_code, url, resp.text)
+   resp.status_code, url, resp.text)
         except requests.RequestException as e:
             logger.error('Request error for %s: %s', url, e)
         except Exception as e:
