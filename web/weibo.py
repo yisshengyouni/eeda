@@ -4,18 +4,16 @@ from logging import Formatter
 import logging
 import os
 import requests
-import asyncio
-import aiohttp
-from pyquery import PyQuery as pq
 from flask import Flask
 from flask import render_template
 from flask import request, jsonify
 import datetime
-from dateutil import parser
 from sqlalchemy.orm import declarative_base
 import sqlalchemy as db
 
 import json
+
+from web.weibo_client import WeiboClient
 
 # import eeda.const
 
@@ -30,13 +28,6 @@ import json
 # sys.setdefaultencoding('utf8')
 
 
-headers = {
-    'Host': 'm.weibo.cn',
-    'Referer': 'https://m.weibo.cn/u/5687069307',
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
-    'X-Requested-With': 'XMLHttpRequest',
-}
-
 app = Flask(__name__)
 # app.config['SQLALCHEMY_DATABASE_URI'] = "mysql+pymysql://"+eeda.const.MYSQL_USER+":"+eeda.const.MYSQL_PASS+"@"+eeda.const.MYSQL_HOST+"/"+eeda.const.MYSQL_DB
 
@@ -50,7 +41,7 @@ engine = db.create_engine("postgresql://user:password@localhost/database")
 
 Base = declarative_base()
 
-page_cache = {}
+weibo_client = WeiboClient()
 
 
 def renderResultJson(data, success=True, message=''):
@@ -145,269 +136,25 @@ def add_wx_user():
 @app.route('/<page>/<prefix>/<uid>')
 def hello(page, prefix='230413', uid='7519797263'):
     print('get weibo, page -> ', page)
-    data = []
-    # 使用异步请求获取微博数据，支持超时处理和缓存机制
     containerid = prefix + uid
-    data = get_weibo(page, containerid)
-    
+    data = weibo_client.get_weibo(page, containerid)
     return jsonify({'success': True, 'data': data, 'message': 'suc'})
 
 
 @app.route('/get_weibo_buyer/<uid>')
 def get_weibo_buyer(uid):
-    try:
-        url = 'https://m.weibo.cn/api/container/getIndex?type=uid&value='+uid
-        # 添加超时设置
-        response = requests.get(url, headers=headers, timeout=10)
-        app.logger.info(response)
-        res_json = response.json()
-        return {'desc': res_json.get('data').get('userInfo').get('description'),
-                'screen_name': res_json.get('data').get('userInfo').get('screen_name'),
-                'profile_image_url': res_json.get('data').get('userInfo').get('profile_image_url'),
-                'following': res_json.get('data').get('userInfo').get('follow_count'),
-                'followers': res_json.get('data').get('userInfo').get('followers_count'),
-                'statuses_count': res_json.get('data').get('userInfo').get('statuses_count')}
-    except (requests.ConnectionError, requests.Timeout, Exception) as e:
-        app.logger.error(e)
-        return {'desc': '', 'screen_name': '', 'profile_image_url': ''}
-
-
-async def get_page_async(page, containerid, timeout=10):
-    """异步获取页面数据，支持超时和缓存机制"""
-    try:
-        if containerid is None:
-            # 默认
-            containerid = '2304137519797263'
-        url = 'https://m.weibo.cn/api/container/getIndex?containerid=' + \
-            containerid + '_-_WEIBO_SECOND_PROFILE_WEIBO&page_type=03&page='
-        url += str(page)
-        print('url:  ', url)
-        app.logger.info('url : %s ', url)
-        
-        # 异步请求，并设置超时时间
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    json_data = await response.json()
-                    # 将成功获取的数据存入缓存
-                    cache_key = f"page_{page}_{containerid}"
-                    page_cache[cache_key] = json_data
-                    return json_data
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        print('Async Request Error:', str(e))
-        # 请求失败或超时时，尝试从缓存中获取数据
-        cache_key = f"page_{page}_{containerid}"
-        if cache_key in page_cache:
-            print('Using cached data due to request timeout/error')
-            app.logger.warning('Using cached data for page %s, containerid %s due to request error', page, containerid)
-            return page_cache[cache_key]
-        else:
-            print('No cached data available')
-            app.logger.error('No cached data available for page %s, containerid %s', page, containerid)
-            return None
-
-def get_page(page, containerid, timeout=10):
-    """同步版本的get_page，内部调用异步版本"""
-    try:
-        # 在新的事件循环中运行异步函数
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(get_page_async(page, containerid, timeout))
-        finally:
-            loop.close()
-    except Exception as e:
-        print('Error in get_page:', str(e))
-        # 发生错误时，尝试从缓存中获取数据
-        cache_key = f"page_{page}_{containerid}"
-        if cache_key in page_cache:
-            print('Using cached data due to error')
-            app.logger.warning('Using cached data for page %s, containerid %s due to error', page, containerid)
-            return page_cache[cache_key]
-        else:
-            print('No cached data available')
-            app.logger.error('No cached data available for page %s, containerid %s', page, containerid)
-            return None
-
-def get_extend(id):
-    try:
-        # 展开全文
-        url = 'https://m.weibo.cn/statuses/extend?id='
-        url += str(id)
-        # 添加超时设置
-        response = requests.get(url, headers=headers, timeout=10)
-        print('get_extend --> ', response.text)
-        if response.status_code == 200:
-            return response.json().get('data')
-    except (requests.ConnectionError, requests.Timeout) as e:
-        print('Error', e.args)
+    return weibo_client.get_user_info(uid)
 
 
 @app.route('/get_detail/<id>')
 def get_detail(id):
-    try:
-        # 展开全文
-        url = 'https://m.weibo.cn/statuses/extend?id='
-        url += str(id)
-        weibo = page_cache.get(str(id))
-        if weibo is not None:
-            print('从缓存中获取weibo详情, ', weibo)
-            if weibo['text'].endswith('...全文') :
-                if weibo.get('longTextContent') is not None:
-                    return weibo    
-            else:
-                return weibo
-        else:
-            weibo = {}
-        # 添加超时设置
-        response = requests.get(url, headers=headers, timeout=10)
-        print('detail --> ', response.text)
-        if response.status_code == 200:
-            # print(response.json())
-            # 合并weibo和response.json().get('data')数据
-            data = response.json().get('data')
-            if data:
-                weibo.update(data)
-            return weibo
-    except (requests.ConnectionError, requests.Timeout) as e:
-        print('Error', e.args)
-    return {}
+    return weibo_client.get_detail(id)
 
 
 # 获取评论
 @app.route('/get_comment/<id>')
 def get_comment(id):
-    try:
-        # 展开全文
-        url = 'https://m.weibo.cn/comments/hotflow?id='+str(id)+'&mid='+str(id)+'&max_id_type=0'
-        # 添加超时设置
-        response = requests.get(url, headers=headers, timeout=10)
-        # print('comment --> ', response.text)
-        if response.status_code == 200:
-            # print(response.json())
-            return response.json().get('data').get('data')
-    except (requests.ConnectionError, requests.Timeout) as e:
-        print('Error', e.args)
-    return []
-
-
-# 解析数据
-def parse_page(json):
-    # print(json)
-    if json:
-        items = json.get('data').get('cards')
-        for index, item in enumerate(items):
-            # 特殊的卡片
-            card_group = item.get('card_group')
-            if card_group is not None:
-                for card in card_group:
-                    item = card.get('mblog')
-                    print("item: ", item)
-                    if item is None:
-                        continue
-            else:
-                item = item.get('mblog')
-
-            print("item: ", item)
-            if item is None:
-                continue
-
-            weibo = {}
-            weibo['id'] = item.get('id')
-            if item.get('text').strip():
-                weibo['text'] = pq(item.get('text').strip()).text()
-            else:
-                weibo['text'] = ''
-
-            if weibo['text'] == '':
-                continue
-
-            # .replace('<br />', '\\n')
-            weibo['attitudes'] = item.get('attitudes_count')
-            weibo['comments'] = item.get('comments_count')
-            weibo['reposts'] = item.get('reposts_count')
-            weibo['original_pic'] = item.get('original_pic')
-            pics = item.get('pics')
-            pics_data = []
-            if pics:
-                for pic in pics:
-                    pic_data = {}
-                    pic_data['url'] = pic.get('url')
-                    pic_data['large_url'] = pic.get('large').get('url')
-                    pics_data.append(pic_data)
-            weibo['pics'] = pics_data
-
-            weibo['created_at'] = parse_time(item.get('created_at'))
-            # 置顶的微博不自动展开
-            if weibo['text'].endswith('...全文') and item.get('isTop')!=1:
-                detail_data = get_extend(weibo['id'])
-                if detail_data and detail_data.get('longTextContent'):
-                    weibo['text'] = detail_data.get('longTextContent')
-            yield weibo
-
-
-def get_weibo(page, containerid):
-    json = get_page(page, containerid)
-    if json is None:
-        # 如果获取页面数据失败且没有缓存，返回空列表
-        return []
-    
-    result = parse_page(json)
-    weibo = []
-    for res in result:
-        page_cache[str(res['id'])] = res
-        weibo.append(res)
-    return weibo
-
-
-def parse_time(create_at):
-    # 时间格式有3种, xx小时前, yyyy-MM-dd ,MM-dd, 昨天 HH:mm
-    print('parse_time  create_at: ', create_at)
-
-    minutes_index = create_at.find('分钟前')
-    # print("hours_index : ", hours_index)
-    if minutes_index >= 0:
-        minutes = create_at[0:minutes_index]
-        now = datetime.datetime.now()
-        delta = datetime.timedelta(minutes=int(minutes))
-        n_now = now - delta
-        res = n_now.strftime('%Y-%m-%d %H:%M:%S')
-        app.logger.debug(res)
-        return res
-
-    hours_index = create_at.find('小时前')
-    # print("hours_index : ", hours_index)
-    if hours_index >= 0:
-        hours = create_at[0:hours_index]
-        now = datetime.datetime.now()
-        delta = datetime.timedelta(hours=int(hours))
-        n_now = now - delta
-        res = n_now.strftime('%Y-%m-%d %H:%M:%S')
-        app.logger.debug(res)
-        return res
-
-    day_index = create_at.find('昨天')
-    if day_index >= 0:
-        now = datetime.datetime.now()
-        delta = datetime.timedelta(days=1)
-        n_now = now - delta
-        res = n_now.strftime('%Y-%m-%d')
-        res = (res + create_at[2:8])
-        app.logger.debug(res)
-        return res
-
-    # MM-dd
-    if len(create_at) == 5:
-        now = datetime.datetime.now()
-        res = now.strftime('%Y')
-        res = (res + '-' + create_at)
-        app.logger.debug(res)
-        return res
-
-    if create_at.find('+0800') > 0:
-        f_date = parser.parse(create_at)
-        return f_date.strftime('%Y-%m-%d %H:%M:%S')
-    return create_at
+    return weibo_client.get_comments(id)
 
 
 wechat_token = {
