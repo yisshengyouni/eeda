@@ -1,0 +1,9 @@
+[    3083ms] [WARNING] The PerformanceObserver does not support buffered flag with the entryTypes argument. @ https://a.sinaimg.cn/mintra/pic/2406250331/48po.js:138
+[    3558ms] [WARNING] [Elastic APM] RUM agent is inactive @ https://h5.sinaimg.cn/m/weibo-pro-next/assets/index-D4EoOw8F.js:715
+[    3567ms] [LOG] Exposure Batch Service (Renamed Fields) Initialized. @ https://h5.sinaimg.cn/m/weibo-pro-next/assets/index-D4EoOw8F.js:706
+[    6301ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://multimedia.api.weibo.com/2/multimedia/user/play_history/report.json?source=339644097&play_type=0&video_orientation=vertical&video_duration=20&id=5287908787618996&id_type=0&oid=1034%3A5287904256131096&is_contribution=0&reqHost=https%253A%252F%252Fweibo.com%252Fnewlogin%253Ftabtype%253Dweibo%2526gid%253D102803%2526openLoginLayer%253D0%2526url%253Dhttps%253A%252F%252Fweibo.com%252F&seconds=0:0
+[   32800ms] [WARNING] The PerformanceObserver does not support buffered flag with the entryTypes argument. @ https://a.sinaimg.cn/mintra/pic/2406250331/48po.js:138
+[   32867ms] [WARNING] [Elastic APM] RUM agent is inactive @ https://h5.sinaimg.cn/m/weibo-pro-next/assets/index-D4EoOw8F.js:715
+[   32870ms] [LOG] Exposure Batch Service (Renamed Fields) Initialized. @ https://h5.sinaimg.cn/m/weibo-pro-next/assets/index-D4EoOw8F.js:706
+[   34121ms] [LOG] PerformanceResourceTiming @ https://a.sinaimg.cn/mintra/pic/2406250331/48po.js:79
+[   34121ms] [LOG] DNS: 0ms, TCP: 0ms, TTFB: 838.5ms, SSL: 0ms @ https://a.sinaimg.cn/mintra/pic/2406250331/48po.js:92

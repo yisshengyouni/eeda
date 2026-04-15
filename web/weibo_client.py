@@ -12,6 +12,13 @@ MAX_CACHE_SIZE = 500
 DEFAULT_TTL = 300  # 5 minutes
 SAVE_INTERVAL = 60
 
+WEIBO_COOKIE="""
+    SUB=_2A25E2-CVDeRhGeRL71QY9ibLzzyIHXVnmXxdrDV6PUJbktAYLXTgkW1NUyyu4H7sS8QhjRzfCCKj8tkEJcDwNz8R;                                                                      
+  SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9W5mOVdIgk9nQ8GnIQwriW3T5NHD95QESKBc1KqRS0B7Ws4Dqcjci--fiK.7iKn0i--NiK.0iKLhi--Ni-i8i-2Xi--Xi-ihiK.Ni--fiK.pi-2Ri--NiK.piKLh;                        
+  SCF=ArnADx7wqr8O_ahdWyjjYPav5ugcQGTuhBAZ6n-f0dxsRtdmaNCAV4C84JUg4PskYOhU-sWqddsVGQxmFVzhIZw.; SSOLoginState=1776259269; ALF=1778851269; MLOGIN=1; _T_WM=61011888518; XSRF-TOKEN=1c374d;   
+  M_WEIBOCN_PARAMS=uicode%3D20000174;                                                                                                                                                       
+  WBPSESS=37cCvaJpVHXbfW7WW2gsD8Qnsm1jAfPFv5IrcMR-9_2LhGr91DDnp7mdoQCTDPVanPp9HFWPPBcVaCjW76Np9YXTqM__bJRCNlTGnqY4Bxu0IavRGXMhKP6b05HABu56wt64xrnVIziwEx9DvE222g=="""
+                   
 
 class WeiboCache:
     def __init__(self, ttl=DEFAULT_TTL, max_size=MAX_CACHE_SIZE, cache_file=CACHE_FILE):
@@ -136,13 +143,17 @@ def parse_time(create_at):
 def parse_page(json_data):
     result = []
     if not json_data or not isinstance(json_data, dict):
+        logger.debug('parse_page: json_data is empty or not dict: %s', type(json_data))
         return result
     data = json_data.get('data')
     if not data or not isinstance(data, dict):
+        logger.debug('parse_page: missing or invalid data field, keys=%s', list(json_data.keys()) if isinstance(json_data, dict) else 'n/a')
         return result
     items = data.get('cards')
     if not items:
+        logger.debug('parse_page: no cards found in data, data keys=%s', list(data.keys()))
         return result
+    logger.debug('parse_page: processing %s cards', len(items))
     for item in items:
         card_group = item.get('card_group')
         if card_group is not None:
@@ -170,6 +181,7 @@ def _parse_mblog(item):
     else:
         weibo['text'] = ''
     if weibo['text'] == '':
+        logger.debug('_parse_mblog: skipping empty text for id=%s', weibo['id'])
         return None
     weibo['attitudes'] = item.get('attitudes_count')
     weibo['comments'] = item.get('comments_count')
@@ -189,12 +201,14 @@ def _parse_mblog(item):
     if weibo['text'].endswith('...全文') and item.get('isTop') != 1:
         # long text will be expanded later by client
         pass
+    logger.debug('_parse_mblog: parsed id=%s text_len=%s', weibo['id'], len(weibo['text']))
     return weibo
 
 
 class WeiboClient:
-    def __init__(self, cache=None):
+    def __init__(self, cache=None, cookie=None):
         self.cache = cache or WeiboCache()
+        self._cookie = cookie or os.getenv('WEIBO_COOKIE', WEIBO_COOKIE)
         self.session = requests.Session()
         retries = Retry(
             total=3,
@@ -206,15 +220,31 @@ class WeiboClient:
         self.session.mount('https://', adapter)
         self.session.mount('http://', adapter)
 
+    def set_cookie(self, cookie):
+        self._cookie = cookie
+        logger.info('WeiboClient cookie updated (length=%s)', len(cookie))
+
+    def _request_headers(self):
+        headers = HEADERS.copy()
+        if self._cookie:
+            headers['Cookie'] = self._cookie
+        return headers
+
     def _cache_key(self, prefix, *parts):
         return '_'.join([prefix] + [str(p) for p in parts])
 
     def _fetch_json(self, url, timeout=10):
+        logger.debug('Fetching URL: %s', url)
         try:
-            resp = self.session.get(url, headers=HEADERS, timeout=timeout)
+            resp = self.session.get(url, headers=self._request_headers(), timeout=timeout)
+            logger.debug('Response status %s for %s, content-length: %s',
+                         resp.status_code, url, resp.headers.get('Content-Length'))
             if resp.status_code == 200:
-                return resp.json()
-            logger.warning('Non-200 status %s for %s', resp.status_code, url)
+                data = resp.json()
+                logger.debug('Response OK, keys: %s', list(data.keys()) if isinstance(data, dict) else 'non-dict')
+                return data
+            logger.warning('Non-200 status %s for %s, body snippet: %.200s',
+                           resp.status_code, url, resp.text)
         except requests.RequestException as e:
             logger.error('Request error for %s: %s', url, e)
         except Exception as e:
@@ -224,6 +254,7 @@ class WeiboClient:
     def get_page(self, page, containerid, timeout=10):
         cache_key = self._cache_key('page', page, containerid)
         cached = self.cache.get(cache_key)
+        logger.debug('get_page cache lookup: key=%s, hit=%s', cache_key, cached is not None)
         try:
             if containerid is None:
                 containerid = '2304137519797263'
@@ -236,12 +267,14 @@ class WeiboClient:
             json_data = self._fetch_json(url, timeout)
             if json_data is not None:
                 self.cache.set(cache_key, json_data)
+                logger.debug('get_page fetched and cached new data for page=%s', page)
                 return json_data
         except Exception as e:
             logger.error('Error fetching page %s: %s', page, e)
         if cached is not None:
             logger.warning('Returning cached page %s due to fetch failure', page)
             return cached
+        logger.error('get_page failed and no cache for page=%s containerid=%s', page, containerid)
         return None
 
     def get_page_async(self, page, containerid, timeout=10):
@@ -251,11 +284,14 @@ class WeiboClient:
     def get_detail(self, weibo_id, timeout=10):
         cache_key = self._cache_key('detail', weibo_id)
         cached = self.cache.get(cache_key)
+        logger.debug('get_detail id=%s cache_hit=%s', weibo_id, cached is not None)
         if cached is not None:
             # if cached already has full text, return it
             if not cached.get('text', '').endswith('...全文'):
+                logger.debug('get_detail id=%s returning cached full text', weibo_id)
                 return cached
             if cached.get('longTextContent') is not None:
+                logger.debug('get_detail id=%s returning cached longTextContent', weibo_id)
                 return cached
         url = 'https://m.weibo.cn/statuses/extend?id=' + str(weibo_id)
         data = self._fetch_json(url, timeout)
@@ -264,9 +300,12 @@ class WeiboClient:
             if cached is not None:
                 cached.update(detail)
                 self.cache.set(cache_key, cached)
+                logger.debug('get_detail id=%s updated cached detail', weibo_id)
                 return cached
             self.cache.set(cache_key, detail)
+            logger.debug('get_detail id=%s stored new detail', weibo_id)
             return detail
+        logger.warning('get_detail id=%s fetch failed, returning cached=%s', weibo_id, cached is not None)
         return cached or {}
 
     def get_comments(self, weibo_id, timeout=10):
@@ -295,17 +334,22 @@ class WeiboClient:
         }
 
     def get_weibo(self, page, containerid):
+        logger.debug('get_weibo called page=%s containerid=%s', page, containerid)
         json_data = self.get_page(page, containerid)
         if json_data is None:
+            logger.warning('get_weibo: get_page returned None for page=%s', page)
             return []
         result = parse_page(json_data)
+        logger.debug('get_weibo: parsed %s posts for page=%s', len(result), page)
         for res in result:
             # expand long text if needed
             if res['text'].endswith('...全文'):
                 detail = self.get_detail(res['id'])
                 if detail and detail.get('longTextContent'):
                     res['text'] = detail['longTextContent']
+                    logger.debug('get_weibo: expanded long text for id=%s', res['id'])
             self.cache.set(self._cache_key('detail', res['id']), res)
+        logger.info('get_weibo returning %s posts for page=%s', len(result), page)
         return result
 
 

@@ -1,0 +1,5 @@
+[     868ms] [LOG] isHarmonyOS false @ https://h5.sinaimg.cn/m/weibo-lite/js/app.341d5ed1.js:0
+[     965ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ https://m.weibo.cn/:0
+[     995ms] [INFO] Banner not shown: beforeinstallpromptevent.preventDefault() called. The page must call beforeinstallpromptevent.prompt() to show the banner. @ https://m.weibo.cn/:0
+[    1569ms] [LOG] onupdatefound @ https://h5.sinaimg.cn/m/weibo-lite/js/app.341d5ed1.js:0
+[    2580ms] [LOG] [SW]: New cache is available; please refresh. @ https://h5.sinaimg.cn/m/weibo-lite/js/app.341d5ed1.js:0

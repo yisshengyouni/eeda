@@ -3,7 +3,7 @@ import time
 import json
 import tempfile
 import pytest
-from web.weibo_client import WeiboCache, parse_page, parse_time
+from web.weibo_client import WeiboCache, parse_page, parse_time, WeiboClient
 
 
 def test_cache_set_and_get():
@@ -104,3 +104,63 @@ def test_parse_time_formats():
     assert res.endswith('02-10')
     res = parse_time('Mon Feb 10 12:00:00 +0800 2020')
     assert '2020' in res
+
+
+def test_set_cookie_updates_cookie():
+    client = WeiboClient(cache=WeiboCache(cache_file=None), cookie='')
+    assert client._cookie == ''
+    client.set_cookie('SUB=xxx')
+    assert client._cookie == 'SUB=xxx'
+
+
+# =============================================================================
+# Integration tests against real Weibo API
+# =============================================================================
+
+@pytest.fixture(scope='module')
+def real_client():
+    cookie = os.getenv('WEIBO_COOKIE', '')
+    return WeiboClient(cache=WeiboCache(cache_file=None), cookie=cookie)
+
+
+@pytest.mark.integration
+def test_get_page_real(real_client):
+    data = real_client.get_page(1, '2304137519797263')
+    assert data is not None, 'Weibo API returned None (possible 432 auth required)'
+    assert isinstance(data, dict)
+    assert data.get('ok') in (0, 1)
+    assert 'data' in data
+
+
+@pytest.mark.integration
+def test_get_weibo_real(real_client):
+    posts = real_client.get_weibo(1, '2304137519797263')
+    assert isinstance(posts, list)
+    assert len(posts) > 0, 'Weibo API returned empty list (possible 432 auth required)'
+    post = posts[0]
+    assert 'id' in post
+    assert 'text' in post
+    assert 'created_at' in post
+    assert 'pics' in post
+
+
+@pytest.mark.integration
+def test_get_user_info_real(real_client):
+    info = real_client.get_user_info('7519797263')
+    assert isinstance(info, dict)
+    assert info.get('screen_name'), 'Weibo API returned empty screen_name (possible 432 auth required)'
+    assert 'profile_image_url' in info
+
+
+@pytest.mark.integration
+def test_get_detail_and_comments_real(real_client):
+    posts = real_client.get_weibo(1, '2304137519797263')
+    if not posts:
+        pytest.skip('No posts available to test detail/comments (possible 432 auth required)')
+    weibo_id = posts[0]['id']
+
+    detail = real_client.get_detail(weibo_id)
+    assert isinstance(detail, dict)
+
+    comments = real_client.get_comments(weibo_id)
+    assert isinstance(comments, list)
