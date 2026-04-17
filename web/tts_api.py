@@ -12,14 +12,22 @@ Edge TTS API 服务 - 语音合成与合并
 import os
 import asyncio
 import tempfile
+import logging
 import edge_tts
 from pydub import AudioSegment
 from flask import request, jsonify, send_from_directory, Blueprint
 from pathlib import Path
 
+# 配置日志
+logger = logging.getLogger(__name__)
+
 # 输出目录
 OUTPUT_DIR = Path(__file__).parent.parent / "output" / "tts"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# TTS 重试配置
+TTS_MAX_RETRIES = 3
+TTS_RETRY_DELAY = 2  # 秒
 
 
 def _run_async(coro):
@@ -32,9 +40,34 @@ def _run_async(coro):
 
 
 async def _generate_tts(text, output_path, voice="zh-CN-XiaoxiaoNeural", rate="+0%", volume="+0%"):
-    """异步生成单个 TTS 音频文件"""
-    communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume)
-    await communicate.save(str(output_path))
+    """异步生成单个 TTS 音频文件，带重试机制"""
+    last_exception = None
+    
+    for attempt in range(1, TTS_MAX_RETRIES + 1):
+        try:
+            communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume)
+            await communicate.save(str(output_path))
+            logger.info(f"TTS 生成成功: {voice}, 文本长度: {len(text)}")
+            return  # 成功则直接返回
+        except Exception as e:
+            last_exception = e
+            error_msg = str(e)
+            
+            # 记录重试日志
+            logger.warning(
+                f"TTS 生成失败 (尝试 {attempt}/{TTS_MAX_RETRIES}): {error_msg}"
+            )
+            
+            # 如果是 403 错误，等待更长时间后重试
+            if "403" in error_msg and attempt < TTS_MAX_RETRIES:
+                retry_delay = TTS_RETRY_DELAY * attempt  # 递增延迟
+                logger.info(f"等待 {retry_delay} 秒后重试...")
+                await asyncio.sleep(retry_delay)
+            elif attempt < TTS_MAX_RETRIES:
+                await asyncio.sleep(TTS_RETRY_DELAY)
+    
+    # 所有重试都失败，抛出最后一次异常
+    raise last_exception
 
 
 def _merge_audio_files(file_paths, output_path):

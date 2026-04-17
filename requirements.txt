@@ -10,7 +10,7 @@ configparser==5.3.0
 contextlib2==21.6.0
 cryptography==40.0.2
 cssselect==1.2.0
-edge-tts==7.0.0
+edge-tts>=7.0.2
 pydub==0.25.1
 cx-Oracle==8.3.0
 Flask==3.0.0
