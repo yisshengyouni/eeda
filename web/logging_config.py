@@ -1,33 +1,25 @@
 # -*- coding: UTF-8 -*-
 """
-日志配置示例
+日志配置 - 控制台输出
 
 使用方式:
     from web.logging_config import setup_logging
-    setup_logging(level='INFO', log_file='tts_api.log')
+    setup_logging(level='INFO')
 """
 
 import logging
 import sys
-from logging.handlers import RotatingFileHandler
-import os
 
 
 def setup_logging(
     level='INFO',
-    log_file=None,
-    max_bytes=10*1024*1024,  # 10MB
-    backup_count=5,
     log_format=None
 ):
     """
-    配置日志系统
+    配置日志系统（仅控制台输出）
     
     参数:
         level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: 日志文件路径，如果为 None 则只输出到控制台
-        max_bytes: 单个日志文件最大大小（默认 10MB）
-        backup_count: 保留的日志文件数量（默认 5 个）
         log_format: 日志格式字符串
     """
     
@@ -53,40 +45,19 @@ def setup_logging(
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
     
-    # 如果指定了日志文件，添加文件 handler
-    if log_file:
-        # 确保日志目录存在
-        log_dir = os.path.dirname(log_file)
-        if log_dir and not os.path.exists(log_dir):
-            os.makedirs(log_dir, exist_ok=True)
-        
-        # 添加轮转文件 handler
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding='utf-8'
-        )
-        file_handler.setLevel(numeric_level)
-        file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler)
-        
-        logging.info(f"日志文件: {log_file} (最大 {max_bytes} bytes, 保留 {backup_count} 个)")
-    
-    logging.info(f"日志级别: {level}")
+    logging.info(f"日志级别: {level} (控制台输出)")
     logging.info(f"日志配置完成")
 
 
-def setup_flask_logging(app, level='INFO', log_file=None):
+def setup_flask_logging(app, level='INFO'):
     """
-    为 Flask 应用配置日志
+    为 Flask 应用配置日志（仅控制台输出）
     
     参数:
         app: Flask 应用实例
         level: 日志级别
-        log_file: 日志文件路径
     """
-    setup_logging(level=level, log_file=log_file)
+    setup_logging(level=level)
     
     # 设置 Flask 的日志级别
     app.logger.setLevel(getattr(logging, level.upper(), logging.INFO))
@@ -95,12 +66,12 @@ def setup_flask_logging(app, level='INFO', log_file=None):
     for handler in logging.getLogger().handlers:
         app.logger.addHandler(handler)
     
-    app.logger.info("Flask 应用日志配置完成")
+    app.logger.info("Flask 应用日志配置完成 (控制台输出)")
 
 
 # 常用日志配置预设
 class LoggingPresets:
-    """日志配置预设"""
+    """日志配置预设（仅控制台输出）"""
     
     @staticmethod
     def development():
@@ -108,24 +79,14 @@ class LoggingPresets:
         setup_logging(level='DEBUG')
     
     @staticmethod
-    def production(log_file='logs/tts_api.log'):
-        """生产环境配置 - INFO 级别，输出到文件和控制台"""
-        setup_logging(
-            level='INFO',
-            log_file=log_file,
-            max_bytes=50*1024*1024,  # 50MB
-            backup_count=10
-        )
+    def production():
+        """生产环境配置 - INFO 级别，输出到控制台"""
+        setup_logging(level='INFO')
     
     @staticmethod
-    def debug_with_file(log_file='logs/tts_debug.log'):
-        """调试配置 - DEBUG 级别，输出到文件"""
-        setup_logging(
-            level='DEBUG',
-            log_file=log_file,
-            max_bytes=100*1024*1024,  # 100MB
-            backup_count=20
-        )
+    def debug():
+        """调试配置 - DEBUG 级别，输出到控制台"""
+        setup_logging(level='DEBUG')
     
     @staticmethod
     def minimal():
@@ -136,7 +97,8 @@ class LoggingPresets:
 # 使用示例
 if __name__ == '__main__':
     # 示例 1: 开发环境
-    print("示例 1: 开发环境日志配置")
+    print("示例 1: 开发环境日志配置 (DEBUG)")
+    print("=" * 60)
     LoggingPresets.development()
     logging.debug("这是一条 DEBUG 日志")
     logging.info("这是一条 INFO 日志")
@@ -146,6 +108,8 @@ if __name__ == '__main__':
     print("\n" + "="*60 + "\n")
     
     # 示例 2: 生产环境
-    print("示例 2: 生产环境日志配置")
-    LoggingPresets.production('logs/example.log')
+    print("示例 2: 生产环境日志配置 (INFO)")
+    print("=" * 60)
+    LoggingPresets.production()
     logging.info("生产环境日志测试")
+    logging.warning("这是一条 WARNING 日志")
