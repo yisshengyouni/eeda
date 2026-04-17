@@ -12,9 +12,10 @@ Edge TTS API 服务 - 语音合成与合并
 import os
 import asyncio
 import tempfile
+import io
 import edge_tts
 from pydub import AudioSegment
-from flask import request, jsonify, send_from_directory, Blueprint
+from flask import request, jsonify, send_from_directory, send_file, Blueprint
 from pathlib import Path
 
 # 输出目录
@@ -99,6 +100,46 @@ async def _generate_tts(text, output_path, voice="zh-CN-XiaoxiaoNeural", rate="+
     raise last_exception
 
 
+async def _generate_tts_bytes(text, voice="zh-CN-XiaoxiaoNeural", rate="+0%", volume="+0%"):
+    """异步生成 TTS 音频字节数据（不落地文件），带重试机制"""
+    last_exception = None
+
+    print(f"[INFO] 开始生成 TTS 内存流 - 语音: {voice}, 语速: {rate}, 音量: {volume}, 文本长度: {len(text)}")
+    print(f"[DEBUG] TTS 文本内容: {text[:100]}{'...' if len(text) > 100 else ''}")
+
+    for attempt in range(1, TTS_MAX_RETRIES + 1):
+        try:
+            print(f"[DEBUG] TTS 内存流尝试 {attempt}/{TTS_MAX_RETRIES} - 创建 Communicate 对象")
+            communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume)
+
+            print(f"[DEBUG] TTS 内存流尝试 {attempt}/{TTS_MAX_RETRIES} - 开始流式读取")
+            audio_bytes = b""
+            async for chunk in communicate.stream():
+                if chunk.get("type") == "audio":
+                    audio_bytes += chunk["data"]
+
+            print(f"[INFO] TTS 内存流生成成功 (尝试 {attempt}/{TTS_MAX_RETRIES}): {len(audio_bytes)} bytes")
+            return audio_bytes
+
+        except Exception as e:
+            last_exception = e
+            error_msg = str(e)
+            error_type = type(e).__name__
+
+            print(f"[WARN] TTS 内存流生成失败 (尝试 {attempt}/{TTS_MAX_RETRIES}): [{error_type}] {error_msg}")
+
+            if "403" in error_msg and attempt < TTS_MAX_RETRIES:
+                retry_delay = TTS_RETRY_DELAY * attempt
+                print(f"[INFO] 等待 {retry_delay} 秒后重试...")
+                await asyncio.sleep(retry_delay)
+            elif attempt < TTS_MAX_RETRIES:
+                print(f"[INFO] 等待 {TTS_RETRY_DELAY} 秒后重试...")
+                await asyncio.sleep(TTS_RETRY_DELAY)
+
+    print(f"[ERROR] TTS 内存流生成最终失败 - 已重试 {TTS_MAX_RETRIES} 次, 最后错误: {last_exception}")
+    raise last_exception
+
+
 def _merge_audio_files(file_paths, output_path):
     """使用 pydub 合并多个 mp3 文件"""
     print(f"[INFO] 开始合并音频文件 - 文件数量: {len(file_paths)}, 输出路径: {output_path}")
@@ -148,12 +189,12 @@ def register_tts_routes(app):
             "rate": "+0%",
             "volume": "+0%",
             "output_filename": "tts_output.mp3",
-            "return_type": "file" | "json"
+            "return_type": "file" | "stream" | "json"
         }
         """
         print("=" * 60)
         print("[INFO] 📥 收到 TTS 请求")
-        
+
         data = request.get_json(force=True) or {}
         print(f"[DEBUG] 请求参数: {data}")
 
@@ -167,13 +208,28 @@ def register_tts_routes(app):
         volume = data.get('volume', '+0%')
         return_type = data.get('return_type', 'json')
         output_filename = data.get('output_filename') or 'tts_output.mp3'
-        
+
         print(f"[INFO] 📝 TTS 参数 - 语音: {voice}, 语速: {rate}, 音量: {volume}, 返回类型: {return_type}")
         print(f"[INFO] 📝 文本长度: {len(text)}, 输出文件名: {output_filename}")
-        
+
         output_filename = _secure_filename(output_filename)
         if not output_filename.endswith('.mp3'):
             output_filename += '.mp3'
+
+        # 内存流返回：不落地文件，直接返回音频字节
+        if return_type == 'stream':
+            print("[INFO] 🔄 开始生成 TTS 内存流...")
+            try:
+                audio_bytes = _run_async(_generate_tts_bytes(text, voice, rate, volume))
+                print(f"[INFO] 📤 返回音频流, 大小: {len(audio_bytes)} bytes")
+                return send_file(
+                    io.BytesIO(audio_bytes),
+                    mimetype='audio/mpeg',
+                    as_attachment=False
+                )
+            except Exception as e:
+                print(f"[ERROR] ❌ TTS 内存流生成异常: {e}")
+                return jsonify({'success': False, 'message': f'TTS 生成失败: {str(e)}'}), 500
 
         output_path = OUTPUT_DIR / output_filename
         print(f"[DEBUG] 完整输出路径: {output_path}")
@@ -212,7 +268,7 @@ def register_tts_routes(app):
                 {"text": "世界", "voice": "zh-CN-YunxiNeural"}
             ],
             "output_filename": "merged.mp3",
-            "return_type": "file" | "json"
+            "return_type": "file" | "stream" | "json"
         }
         """
         print("=" * 60)
@@ -293,6 +349,10 @@ def register_tts_routes(app):
             print(f"[INFO] 📤 返回合并后的音频文件: {output_filename}")
             return send_from_directory(str(OUTPUT_DIR), output_filename, as_attachment=False)
 
+        if return_type == 'stream':
+            print(f"[INFO] 📤 返回合并后的音频流: {output_filename}")
+            return send_file(str(final_output_path), mimetype='audio/mpeg', as_attachment=False)
+
         print(f"[INFO] 📤 返回合并后的 JSON 响应 - 文件名: {output_filename}")
         return jsonify({
             'success': True,
@@ -357,3 +417,179 @@ def register_tts_routes(app):
         print(f"[INFO] ✅ 文件存在，大小: {file_size} bytes，准备返回")
         
         return send_from_directory(str(OUTPUT_DIR), safe_name, as_attachment=False)
+
+
+# =============================================================================
+# 远程服务调用示例脚本 (curl / wget)
+# =============================================================================
+"""
+## 1. 单文本转语音 (POST /api/tts)
+
+### curl 示例:
+```bash
+# 基本调用 - 返回 JSON
+curl -X POST http://localhost:5000/api/tts \
+  -H "Content-Type: application/json" \
+  -d '{"text": "你好世界，这是语音合成测试"}'
+
+# 指定语音、语速、音量
+curl -X POST http://localhost:5000/api/tts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "你好世界，这是语音合成测试",
+    "voice": "zh-CN-YunxiNeural",
+    "rate": "+10%",
+    "volume": "+0%",
+    "output_filename": "test_output.mp3"
+  }'
+
+# 直接返回音频文件
+curl -X POST http://localhost:5000/api/tts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "你好世界",
+    "return_type": "file"
+  }' \
+  --output output.mp3
+```
+
+### wget 示例:
+```bash
+# 返回 JSON
+wget -qO- http://localhost:5000/api/tts \
+  --post-data='{"text": "你好世界"}' \
+  --header="Content-Type: application/json"
+
+# 下载音频文件
+wget -qO output.mp3 http://localhost:5000/api/tts \
+  --post-data='{"text": "你好世界", "return_type": "file"}' \
+  --header="Content-Type: application/json"
+```
+
+## 2. 多段语音合并 (POST /api/tts/merge)
+
+### curl 示例:
+```bash
+# 合并多段语音
+curl -X POST http://localhost:5000/api/tts/merge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "segments": [
+      {"text": "第一段语音", "voice": "zh-CN-XiaoxiaoNeural"},
+      {"text": "第二段语音", "voice": "zh-CN-YunxiNeural", "rate": "+20%"},
+      {"text": "第三段语音", "voice": "zh-CN-XiaoyiNeural"}
+    ],
+    "output_filename": "merged_output.mp3"
+  }'
+
+# 直接返回合并后的音频文件
+curl -X POST http://localhost:5000/api/tts/merge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "segments": [
+      {"text": "第一段", "voice": "zh-CN-XiaoxiaoNeural"},
+      {"text": "第二段", "voice": "zh-CN-YunxiNeural"}
+    ],
+    "return_type": "file"
+  }' \
+  --output merged.mp3
+```
+
+### wget 示例:
+```bash
+wget -qO- http://localhost:5000/api/tts/merge \
+  --post-data='{
+    "segments": [
+      {"text": "第一段语音", "voice": "zh-CN-XiaoxiaoNeural"},
+      {"text": "第二段语音", "voice": "zh-CN-YunxiNeural"}
+    ]
+  }' \
+  --header="Content-Type: application/json"
+```
+
+## 3. 获取可用语音列表 (GET /api/tts/voices)
+
+### curl 示例:
+```bash
+curl -X GET http://localhost:5000/api/tts/voices
+```
+
+### wget 示例:
+```bash
+wget -qO- http://localhost:5000/api/tts/voices
+```
+
+## 4. 下载音频文件 (GET /api/tts/download/<filename>)
+
+### curl 示例:
+```bash
+# 下载指定文件
+curl -X GET http://localhost:5000/api/tts/download/test_output.mp3 \
+  --output downloaded.mp3
+```
+
+### wget 示例:
+```bash
+# 下载指定文件
+wget -qO downloaded.mp3 http://localhost:5000/api/tts/download/test_output.mp3
+```
+
+## 5. 批量测试脚本
+
+### Bash 脚本示例 (test_tts.sh):
+```bash
+#!/bin/bash
+
+BASE_URL="http://localhost:5000"
+
+# 测试单文本转语音
+echo "=== 测试单文本转语音 ==="
+curl -X POST "${BASE_URL}/api/tts" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "欢迎使用语音合成服务"}'
+
+echo -e "\n\n=== 测试获取语音列表 ==="
+curl -X GET "${BASE_URL}/api/tts/voices" | head -c 500
+
+echo -e "\n\n=== 测试多段语音合并 ==="
+curl -X POST "${BASE_URL}/api/tts/merge" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "segments": [
+      {"text": "第一段", "voice": "zh-CN-XiaoxiaoNeural"},
+      {"text": "第二段", "voice": "zh-CN-YunxiNeural"}
+    ],
+    "output_filename": "batch_test.mp3"
+  }'
+
+echo -e "\n\n测试完成!"
+```
+
+### 使用方法:
+```bash
+chmod +x test_tts.sh
+./test_tts.sh
+```
+
+## 6. Windows PowerShell 示例
+
+```powershell
+# 单文本转语音
+$body = @{ text = "你好世界" } | ConvertTo-Json -Compress
+Invoke-RestMethod -Uri "http://localhost:5000/api/tts" -Method POST -ContentType "application/json" -Body $body
+
+# 多段语音合并
+$segments = @(
+    @{ text = "第一段"; voice = "zh-CN-XiaoxiaoNeural" },
+    @{ text = "第二段"; voice = "zh-CN-YunxiNeural" }
+)
+$body = @{ segments = $segments } | ConvertTo-Json -Compress -Depth 3
+Invoke-RestMethod -Uri "http://localhost:5000/api/tts/merge" -Method POST -ContentType "application/json" -Body $body
+
+# 获取语音列表
+Invoke-RestMethod -Uri "http://localhost:5000/api/tts/voices" -Method GET
+
+# 下载音频文件
+Invoke-WebRequest -Uri "http://localhost:5000/api/tts/download/test.mp3" -OutFile "downloaded.mp3"
+```
+"""
