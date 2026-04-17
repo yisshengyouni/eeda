@@ -177,7 +177,7 @@ def _secure_filename(filename):
 def register_tts_routes(app):
     """将 TTS 路由注册到 Flask app"""
 
-    @app.route('/api/tts', methods=['POST'])
+    @app.route('/api/tts', methods=['POST','GET'])
     def api_tts():
         """
         单文本转语音
