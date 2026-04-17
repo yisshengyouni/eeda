@@ -32,9 +32,15 @@ TTS_RETRY_DELAY = 2  # 秒
 
 def _run_async(coro):
     """在新的事件循环中运行异步协程"""
+    logger.debug("创建新的事件循环运行异步任务")
     loop = asyncio.new_event_loop()
     try:
-        return loop.run_until_complete(coro)
+        result = loop.run_until_complete(coro)
+        logger.debug("异步任务执行完成")
+        return result
+    except Exception as e:
+        logger.error(f"异步任务执行失败: {e}")
+        raise
     finally:
         loop.close()
 
@@ -43,40 +49,89 @@ async def _generate_tts(text, output_path, voice="zh-CN-XiaoxiaoNeural", rate="+
     """异步生成单个 TTS 音频文件，带重试机制"""
     last_exception = None
     
+    logger.info(f"开始生成 TTS - 语音: {voice}, 语速: {rate}, 音量: {volume}, 文本长度: {len(text)}")
+    logger.debug(f"TTS 文本内容: {text[:100]}{'...' if len(text) > 100 else ''}")
+    logger.debug(f"输出路径: {output_path}")
+    
     for attempt in range(1, TTS_MAX_RETRIES + 1):
         try:
+            logger.debug(f"TTS 尝试 {attempt}/{TTS_MAX_RETRIES} - 创建 Communicate 对象")
             communicate = edge_tts.Communicate(text, voice, rate=rate, volume=volume)
+            
+            logger.debug(f"TTS 尝试 {attempt}/{TTS_MAX_RETRIES} - 开始保存音频文件")
             await communicate.save(str(output_path))
-            logger.info(f"TTS 生成成功: {voice}, 文本长度: {len(text)}")
+            
+            # 验证文件是否成功生成
+            if output_path.exists():
+                file_size = output_path.stat().st_size
+                logger.info(f"✅ TTS 生成成功 (尝试 {attempt}/{TTS_MAX_RETRIES}): {voice}, 文件大小: {file_size} bytes, 文本长度: {len(text)}")
+            else:
+                logger.warning(f"⚠️ TTS 保存完成但文件不存在: {output_path}")
+            
             return  # 成功则直接返回
+            
         except Exception as e:
             last_exception = e
             error_msg = str(e)
+            error_type = type(e).__name__
             
-            # 记录重试日志
+            # 记录详细的重试日志
             logger.warning(
-                f"TTS 生成失败 (尝试 {attempt}/{TTS_MAX_RETRIES}): {error_msg}"
+                f"❌ TTS 生成失败 (尝试 {attempt}/{TTS_MAX_RETRIES}): [{error_type}] {error_msg}"
             )
+            logger.debug(f"失败详情 - 语音: {voice}, 文本长度: {len(text)}, 输出路径: {output_path}")
+            
+            # 根据错误类型提供不同的日志
+            if "403" in error_msg:
+                logger.warning("🔒 检测到 403 错误 - 可能是 IP 限制、速率限制或 Token 失效")
+            elif "404" in error_msg:
+                logger.warning("🔍 检测到 404 错误 - 可能是语音名称无效")
+            elif "timeout" in error_msg.lower() or "Timeout" in error_msg:
+                logger.warning("⏱️ 检测到超时错误 - 网络连接不稳定")
+            elif "connection" in error_msg.lower():
+                logger.warning("🔌 检测到连接错误 - 网络不可达或防火墙拦截")
             
             # 如果是 403 错误，等待更长时间后重试
             if "403" in error_msg and attempt < TTS_MAX_RETRIES:
                 retry_delay = TTS_RETRY_DELAY * attempt  # 递增延迟
-                logger.info(f"等待 {retry_delay} 秒后重试...")
+                logger.info(f"⏳ 等待 {retry_delay} 秒后重试 (403 错误需要更长等待时间)...")
                 await asyncio.sleep(retry_delay)
             elif attempt < TTS_MAX_RETRIES:
+                logger.info(f"⏳ 等待 {TTS_RETRY_DELAY} 秒后重试...")
                 await asyncio.sleep(TTS_RETRY_DELAY)
     
     # 所有重试都失败，抛出最后一次异常
+    logger.error(f"❌ TTS 生成最终失败 - 已重试 {TTS_MAX_RETRIES} 次, 最后错误: {last_exception}")
     raise last_exception
 
 
 def _merge_audio_files(file_paths, output_path):
     """使用 pydub 合并多个 mp3 文件"""
+    logger.info(f"开始合并音频文件 - 文件数量: {len(file_paths)}, 输出路径: {output_path}")
+    
     combined = AudioSegment.empty()
-    for fp in file_paths:
-        segment = AudioSegment.from_mp3(str(fp))
-        combined += segment
+    total_duration = 0
+    
+    for idx, fp in enumerate(file_paths, 1):
+        try:
+            logger.debug(f"加载音频文件 {idx}/{len(file_paths)}: {fp}")
+            segment = AudioSegment.from_mp3(str(fp))
+            duration = len(segment)
+            total_duration += duration
+            logger.debug(f"音频文件 {idx}/{len(file_paths)} 加载成功 - 时长: {duration}ms")
+            combined += segment
+        except Exception as e:
+            logger.error(f"❌ 加载音频文件失败 [{idx}/{len(file_paths)}]: {fp}, 错误: {e}")
+            raise
+    
+    logger.info(f"开始导出合并后的音频文件 - 总时长: {total_duration}ms ({total_duration/1000:.2f}s)")
     combined.export(str(output_path), format="mp3")
+    
+    if output_path.exists():
+        file_size = output_path.stat().st_size
+        logger.info(f"✅ 音频合并成功 - 输出文件: {output_path}, 大小: {file_size} bytes, 时长: {total_duration}ms")
+    else:
+        logger.error(f"❌ 音频合并失败 - 输出文件不存在: {output_path}")
 
 
 def _secure_filename(filename):
@@ -102,10 +157,15 @@ def register_tts_routes(app):
             "return_type": "file" | "json"
         }
         """
+        logger.info("=" * 60)
+        logger.info("📥 收到 TTS 请求")
+        
         data = request.get_json(force=True) or {}
+        logger.debug(f"请求参数: {data}")
 
         text = data.get('text', '')
         if not text:
+            logger.warning("❌ 请求缺少 text 参数")
             return jsonify({'success': False, 'message': '缺少 text 参数'}), 400
 
         voice = data.get('voice', 'zh-CN-XiaoxiaoNeural')
@@ -113,20 +173,30 @@ def register_tts_routes(app):
         volume = data.get('volume', '+0%')
         return_type = data.get('return_type', 'json')
         output_filename = data.get('output_filename') or 'tts_output.mp3'
+        
+        logger.info(f"📝 TTS 参数 - 语音: {voice}, 语速: {rate}, 音量: {volume}, 返回类型: {return_type}")
+        logger.info(f"📝 文本长度: {len(text)}, 输出文件名: {output_filename}")
+        
         output_filename = _secure_filename(output_filename)
         if not output_filename.endswith('.mp3'):
             output_filename += '.mp3'
 
         output_path = OUTPUT_DIR / output_filename
+        logger.debug(f"完整输出路径: {output_path}")
 
         try:
+            logger.info("🔄 开始生成 TTS 音频...")
             _run_async(_generate_tts(text, output_path, voice, rate, volume))
+            logger.info("✅ TTS 音频生成完成")
         except Exception as e:
+            logger.error(f"❌ TTS 生成异常: {e}", exc_info=True)
             return jsonify({'success': False, 'message': f'TTS 生成失败: {str(e)}'}), 500
 
         if return_type == 'file':
+            logger.info(f"📤 返回音频文件: {output_filename}")
             return send_from_directory(str(OUTPUT_DIR), output_filename, as_attachment=False)
 
+        logger.info(f"📤 返回 JSON 响应 - 文件名: {output_filename}")
         return jsonify({
             'success': True,
             'data': {
@@ -151,52 +221,85 @@ def register_tts_routes(app):
             "return_type": "file" | "json"
         }
         """
+        logger.info("=" * 60)
+        logger.info("📥 收到 TTS 合并请求")
+        
         data = request.get_json(force=True) or {}
         segments = data.get('segments', [])
+        
+        logger.debug(f"请求参数 - segments 数量: {len(segments)}")
 
         if not segments or not isinstance(segments, list):
+            logger.warning("❌ 请求缺少 segments 参数或格式错误")
             return jsonify({'success': False, 'message': '缺少 segments 参数或格式错误'}), 400
 
         return_type = data.get('return_type', 'json')
         output_filename = data.get('output_filename') or 'tts_merged.mp3'
+        
+        logger.info(f"📝 合并参数 - 片段数: {len(segments)}, 输出文件: {output_filename}, 返回类型: {return_type}")
+        
         output_filename = _secure_filename(output_filename)
         if not output_filename.endswith('.mp3'):
             output_filename += '.mp3'
 
         temp_files = []
         final_output_path = OUTPUT_DIR / output_filename
+        
+        logger.debug(f"完整输出路径: {final_output_path}")
 
         try:
             # 1. 为每个 segment 生成临时音频
+            logger.info(f"🔄 开始生成 {len(segments)} 个音频片段...")
             for idx, seg in enumerate(segments):
                 text = seg.get('text', '')
                 if not text:
+                    logger.debug(f"跳过空文本片段 [{idx}]")
                     continue
+                    
                 voice = seg.get('voice', 'zh-CN-XiaoxiaoNeural')
                 rate = seg.get('rate', '+0%')
                 volume = seg.get('volume', '+0%')
+                
+                logger.info(f"🎵 生成片段 [{idx + 1}/{len(segments)}] - 语音: {voice}, 文本长度: {len(text)}")
 
                 temp_path = OUTPUT_DIR / f"_temp_{idx}_{output_filename}"
+                logger.debug(f"片段 [{idx}] 临时文件: {temp_path}")
+                
                 _run_async(_generate_tts(text, temp_path, voice, rate, volume))
                 temp_files.append(temp_path)
+                logger.debug(f"片段 [{idx}] 生成完成")
 
             if not temp_files:
+                logger.warning("❌ 没有有效的音频片段")
                 return jsonify({'success': False, 'message': '没有有效的音频片段'}), 400
 
+            logger.info(f"✅ 所有音频片段生成完成，共 {len(temp_files)} 个")
+            logger.info("🔄 开始合并音频文件...")
+            
             # 2. 合并音频
             _merge_audio_files(temp_files, final_output_path)
+            logger.info("✅ 音频合并完成")
 
         except Exception as e:
+            logger.error(f"❌ 合并过程异常: {e}", exc_info=True)
             return jsonify({'success': False, 'message': f'合并失败: {str(e)}'}), 500
         finally:
             # 3. 清理临时文件
-            for tf in temp_files:
-                if tf.exists():
-                    tf.unlink()
+            logger.debug(f"🧹 开始清理 {len(temp_files)} 个临时文件...")
+            for idx, tf in enumerate(temp_files):
+                try:
+                    if tf.exists():
+                        tf.unlink()
+                        logger.debug(f"已删除临时文件 [{idx}]: {tf}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 删除临时文件失败 [{idx}]: {tf}, 错误: {e}")
+            logger.debug("✅ 临时文件清理完成")
 
         if return_type == 'file':
+            logger.info(f"📤 返回合并后的音频文件: {output_filename}")
             return send_from_directory(str(OUTPUT_DIR), output_filename, as_attachment=False)
 
+        logger.info(f"📤 返回合并后的 JSON 响应 - 文件名: {output_filename}")
         return jsonify({
             'success': True,
             'data': {
@@ -209,8 +312,14 @@ def register_tts_routes(app):
     @app.route('/api/tts/voices', methods=['GET'])
     def api_tts_voices():
         """列出所有可用的中文语音"""
+        logger.info("=" * 60)
+        logger.info("📥 收到获取语音列表请求")
+        
         try:
+            logger.debug("🔄 开始获取 Edge TTS 语音列表...")
             voices = _run_async(edge_tts.list_voices())
+            logger.debug(f"获取到 {len(voices)} 个语音")
+            
             chinese_voices = [
                 {
                     'name': v.get('ShortName'),
@@ -221,19 +330,36 @@ def register_tts_routes(app):
                 for v in voices
                 if v.get('Locale', '').startswith('zh-')
             ]
+            
+            logger.info(f"✅ 成功获取 {len(chinese_voices)} 个中文语音")
+            logger.debug(f"中文语音列表: {[v['name'] for v in chinese_voices]}")
+            
             return jsonify({
                 'success': True,
                 'data': chinese_voices,
                 'message': ''
             })
         except Exception as e:
+            logger.error(f"❌ 获取语音列表失败: {e}", exc_info=True)
             return jsonify({'success': False, 'message': f'获取语音列表失败: {str(e)}'}), 500
 
     @app.route('/api/tts/download/<filename>', methods=['GET'])
     def api_tts_download(filename):
         """下载生成的音频文件"""
+        logger.info("=" * 60)
+        logger.info(f"📥 收到下载请求 - 文件名: {filename}")
+        
         safe_name = _secure_filename(filename)
         file_path = OUTPUT_DIR / safe_name
+        
+        logger.debug(f"安全文件名: {safe_name}")
+        logger.debug(f"完整文件路径: {file_path}")
+        
         if not file_path.exists():
+            logger.warning(f"❌ 文件不存在: {file_path}")
             return jsonify({'success': False, 'message': '文件不存在'}), 404
+        
+        file_size = file_path.stat().st_size
+        logger.info(f"✅ 文件存在，大小: {file_size} bytes，准备返回")
+        
         return send_from_directory(str(OUTPUT_DIR), safe_name, as_attachment=False)
