@@ -15,6 +15,7 @@ import json
 from web.weixin_client import WeixinClient
 
 from web.weibo_client import WeiboClient
+from web.tts_api import register_tts_routes
 
 # import eeda.const
 
@@ -44,6 +45,9 @@ Base = declarative_base()
 
 weixin_client = WeixinClient()
 weibo_client = WeiboClient()
+
+# 注册 TTS API 路由
+register_tts_routes(app)
 
 
 def renderResultJson(data, success=True, message=''):
