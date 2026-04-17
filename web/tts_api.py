@@ -279,6 +279,11 @@ def register_tts_routes(app):
         if not output_filename.endswith('.mp3'):
             output_filename += '.mp3'
 
+        # 如果使用默认文件名，改为基于内容哈希的唯一文件名，避免并发请求互相覆盖
+        if output_filename == 'tts_output.mp3':
+            content_hash = _cache_key(text, voice, rate, volume)
+            output_filename = f"tts_{content_hash}.mp3"
+
         # 检查缓存
         cached_path = _get_cached_audio(text, voice, rate, volume)
 
@@ -376,6 +381,15 @@ def register_tts_routes(app):
         output_filename = _secure_filename(output_filename)
         if not output_filename.endswith('.mp3'):
             output_filename += '.mp3'
+
+        # 如果使用默认文件名，改为基于内容哈希的唯一文件名，避免并发请求互相覆盖
+        if output_filename == 'tts_merged.mp3':
+            seg_fingerprint = "|".join(
+                f"{s.get('text','')}|{s.get('voice','')}|{s.get('rate','')}|{s.get('volume','')}"
+                for s in segments
+            )
+            content_hash = hashlib.md5(seg_fingerprint.encode('utf-8')).hexdigest()
+            output_filename = f"tts_merged_{content_hash}.mp3"
 
         temp_files = []
         final_output_path = OUTPUT_DIR / output_filename
