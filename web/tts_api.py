@@ -13,6 +13,8 @@ import os
 import asyncio
 import tempfile
 import io
+import time
+import hashlib
 import edge_tts
 from pydub import AudioSegment
 from flask import request, jsonify, send_from_directory, send_file, Blueprint
@@ -22,9 +24,16 @@ from pathlib import Path
 OUTPUT_DIR = Path(__file__).parent.parent / "output" / "tts"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# 缓存目录
+CACHE_DIR = OUTPUT_DIR / "_cache"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
 # TTS 重试配置
 TTS_MAX_RETRIES = 3
 TTS_RETRY_DELAY = 2  # 秒
+
+# 缓存有效期（秒）
+TTS_CACHE_TTL = 3600  # 1 小时
 
 
 def _run_async(coro):
@@ -41,7 +50,7 @@ def _run_async(coro):
 
 
 async def _generate_tts(text, output_path, voice="zh-CN-XiaoxiaoNeural", rate="+0%", volume="+0%"):
-    """异步生成单个 TTS 音频文件，带重试机制"""
+    """异步生成单个 TTS 音频文件，带重试机制，生成后自动写入缓存"""
     last_exception = None
     
     print(f"[INFO] 开始生成 TTS - 语音: {voice}, 语速: {rate}, 音量: {volume}, 文本长度: {len(text)}")
@@ -60,6 +69,16 @@ async def _generate_tts(text, output_path, voice="zh-CN-XiaoxiaoNeural", rate="+
             if output_path.exists():
                 file_size = output_path.stat().st_size
                 print(f"[INFO] ✅ TTS 生成成功 (尝试 {attempt}/{TTS_MAX_RETRIES}): {voice}, 文件大小: {file_size} bytes, 文本长度: {len(text)}")
+                
+                # 写入缓存
+                key = _cache_key(text, voice, rate, volume)
+                cache_path = CACHE_DIR / f"{key}.mp3"
+                try:
+                    import shutil
+                    shutil.copy2(str(output_path), str(cache_path))
+                    print(f"[DEBUG] 已写入缓存 - key: {key}")
+                except Exception as e:
+                    print(f"[WARN] 写入缓存失败: {e}")
             else:
                 print(f"[WARN] ⚠️ TTS 保存完成但文件不存在: {output_path}")
             
@@ -101,7 +120,7 @@ async def _generate_tts(text, output_path, voice="zh-CN-XiaoxiaoNeural", rate="+
 
 
 async def _generate_tts_bytes(text, voice="zh-CN-XiaoxiaoNeural", rate="+0%", volume="+0%"):
-    """异步生成 TTS 音频字节数据（不落地文件），带重试机制"""
+    """异步生成 TTS 音频字节数据（不落地文件），带重试机制，生成后自动写入缓存"""
     last_exception = None
 
     print(f"[INFO] 开始生成 TTS 内存流 - 语音: {voice}, 语速: {rate}, 音量: {volume}, 文本长度: {len(text)}")
@@ -119,6 +138,16 @@ async def _generate_tts_bytes(text, voice="zh-CN-XiaoxiaoNeural", rate="+0%", vo
                     audio_bytes += chunk["data"]
 
             print(f"[INFO] TTS 内存流生成成功 (尝试 {attempt}/{TTS_MAX_RETRIES}): {len(audio_bytes)} bytes")
+            
+            # 写入缓存
+            key = _cache_key(text, voice, rate, volume)
+            cache_path = CACHE_DIR / f"{key}.mp3"
+            try:
+                cache_path.write_bytes(audio_bytes)
+                print(f"[DEBUG] 已写入缓存 - key: {key}")
+            except Exception as e:
+                print(f"[WARN] 写入缓存失败: {e}")
+            
             return audio_bytes
 
         except Exception as e:
@@ -174,6 +203,30 @@ def _secure_filename(filename):
     return "".join(c for c in filename if c.isalnum() or c in "._-").strip()
 
 
+def _cache_key(text, voice="zh-CN-XiaoxiaoNeural", rate="+0%", volume="+0%"):
+    """根据 TTS 参数生成缓存键（MD5 哈希）"""
+    raw = f"{text}|{voice}|{rate}|{volume}"
+    return hashlib.md5(raw.encode('utf-8')).hexdigest()
+
+
+def _get_cached_audio(text, voice="zh-CN-XiaoxiaoNeural", rate="+0%", volume="+0%"):
+    """检查缓存是否存在且未过期，命中则返回缓存文件路径，否则返回 None"""
+    key = _cache_key(text, voice, rate, volume)
+    cache_path = CACHE_DIR / f"{key}.mp3"
+    if cache_path.exists():
+        file_age = time.time() - cache_path.stat().st_mtime
+        if file_age < TTS_CACHE_TTL:
+            print(f"[INFO] 📦 缓存命中 - key: {key}, 已缓存: {file_age:.0f}s, 文件大小: {cache_path.stat().st_size} bytes")
+            return cache_path
+        else:
+            print(f"[DEBUG] 缓存已过期 - key: {key}, 过期: {file_age:.0f}s > {TTS_CACHE_TTL}s")
+            try:
+                cache_path.unlink()
+            except Exception:
+                pass
+    return None
+
+
 def _get_request_data():
     """获取请求数据，兼容 GET (query string) 和 POST (JSON body)"""
     if request.method == 'GET':
@@ -225,8 +278,14 @@ def register_tts_routes(app):
         if not output_filename.endswith('.mp3'):
             output_filename += '.mp3'
 
+        # 检查缓存
+        cached_path = _get_cached_audio(text, voice, rate, volume)
+
         # 内存流返回：不落地文件，直接返回音频字节
         if return_type == 'stream':
+            if cached_path:
+                print(f"[INFO] 📤 返回缓存音频流")
+                return send_file(str(cached_path), mimetype='audio/mpeg', as_attachment=False)
             print("[INFO] 🔄 开始生成 TTS 内存流...")
             try:
                 audio_bytes = _run_async(_generate_tts_bytes(text, voice, rate, volume))
@@ -243,13 +302,20 @@ def register_tts_routes(app):
         output_path = OUTPUT_DIR / output_filename
         print(f"[DEBUG] 完整输出路径: {output_path}")
 
-        try:
-            print("[INFO] 🔄 开始生成 TTS 音频...")
-            _run_async(_generate_tts(text, output_path, voice, rate, volume))
-            print("[INFO] ✅ TTS 音频生成完成")
-        except Exception as e:
-            print(f"[ERROR] ❌ TTS 生成异常: {e}")
-            return jsonify({'success': False, 'message': f'TTS 生成失败: {str(e)}'}), 500
+        if cached_path:
+            # 命中缓存：从缓存复制到输出路径
+            print(f"[INFO] 📦 从缓存复制到输出路径")
+            import shutil
+            shutil.copy2(str(cached_path), str(output_path))
+            print("[INFO] ✅ 缓存复制完成")
+        else:
+            try:
+                print("[INFO] 🔄 开始生成 TTS 音频...")
+                _run_async(_generate_tts(text, output_path, voice, rate, volume))
+                print("[INFO] ✅ TTS 音频生成完成")
+            except Exception as e:
+                print(f"[ERROR] ❌ TTS 生成异常: {e}")
+                return jsonify({'success': False, 'message': f'TTS 生成失败: {str(e)}'}), 500
 
         if return_type == 'file':
             print(f"[INFO] 📤 返回音频文件: {output_filename}")
@@ -316,7 +382,7 @@ def register_tts_routes(app):
         print(f"[DEBUG] 完整输出路径: {final_output_path}")
 
         try:
-            # 1. 为每个 segment 生成临时音频
+            # 1. 为每个 segment 生成临时音频（优先使用缓存）
             print(f"[INFO] 🔄 开始生成 {len(segments)} 个音频片段...")
             for idx, seg in enumerate(segments):
                 text = seg.get('text', '')
@@ -331,9 +397,17 @@ def register_tts_routes(app):
                 print(f"[INFO] 🎵 生成片段 [{idx + 1}/{len(segments)}] - 语音: {voice}, 文本长度: {len(text)}")
 
                 temp_path = OUTPUT_DIR / f"_temp_{idx}_{output_filename}"
-                print(f"[DEBUG] 片段 [{idx}] 临时文件: {temp_path}")
                 
-                _run_async(_generate_tts(text, temp_path, voice, rate, volume))
+                # 先查缓存
+                cached = _get_cached_audio(text, voice, rate, volume)
+                if cached:
+                    import shutil
+                    shutil.copy2(str(cached), str(temp_path))
+                    print(f"[INFO] 📦 片段 [{idx}] 从缓存复制")
+                else:
+                    print(f"[DEBUG] 片段 [{idx}] 临时文件: {temp_path}")
+                    _run_async(_generate_tts(text, temp_path, voice, rate, volume))
+                
                 temp_files.append(temp_path)
                 print(f"[DEBUG] 片段 [{idx}] 生成完成")
 
