@@ -174,15 +174,24 @@ def _secure_filename(filename):
     return "".join(c for c in filename if c.isalnum() or c in "._-").strip()
 
 
+def _get_request_data():
+    """获取请求数据，兼容 GET (query string) 和 POST (JSON body)"""
+    if request.method == 'GET':
+        return request.args
+    # POST 等：优先 JSON body
+    return request.get_json(silent=True) or {}
+
+
 def register_tts_routes(app):
     """将 TTS 路由注册到 Flask app"""
 
-    @app.route('/api/tts', methods=['GET', 'POST', 'OPTIONS'])
+    @app.route('/api/tts', methods=['GET', 'POST'])
     def api_tts():
         """
         单文本转语音
 
-        请求体 JSON:
+        GET  查询参数: text, voice, rate, volume, output_filename, return_type
+        POST 请求体 JSON:
         {
             "text": "你好世界",
             "voice": "zh-CN-XiaoxiaoNeural",
@@ -193,10 +202,10 @@ def register_tts_routes(app):
         }
         """
         print("=" * 60)
-        print("[INFO] 📥 收到 TTS 请求")
+        print(f"[INFO] 📥 收到 TTS 请求 ({request.method})")
 
-        data = request.get_json(force=True) or {}
-        print(f"[DEBUG] 请求参数: {data}")
+        data = _get_request_data()
+        print(f"[DEBUG] 请求参数: {dict(data)}")
 
         text = data.get('text', '')
         if not text:
@@ -256,12 +265,13 @@ def register_tts_routes(app):
             'message': 'TTS 生成成功'
         })
 
-    @app.route('/api/tts/merge', methods=['GET', 'POST', 'OPTIONS'])
+    @app.route('/api/tts/merge', methods=['GET', 'POST'])
     def api_tts_merge():
         """
         多段语音合成并合并为一个音频文件
 
-        请求体 JSON:
+        GET  查询参数: segments (JSON编码字符串), output_filename, return_type
+        POST 请求体 JSON:
         {
             "segments": [
                 {"text": "你好", "voice": "zh-CN-XiaoxiaoNeural", "rate": "+0%", "volume": "+0%"},
@@ -272,10 +282,18 @@ def register_tts_routes(app):
         }
         """
         print("=" * 60)
-        print("[INFO] 📥 收到 TTS 合并请求")
+        print(f"[INFO] 📥 收到 TTS 合并请求 ({request.method})")
         
-        data = request.get_json(force=True) or {}
+        data = _get_request_data()
+
+        # GET 请求时 segments 可能为 JSON 编码的字符串
         segments = data.get('segments', [])
+        if isinstance(segments, str):
+            try:
+                import json
+                segments = json.loads(segments)
+            except (json.JSONDecodeError, ValueError):
+                segments = []
         
         print(f"[DEBUG] 请求参数 - segments 数量: {len(segments)}")
 
@@ -363,7 +381,7 @@ def register_tts_routes(app):
             'message': '语音合并成功'
         })
 
-    @app.route('/api/tts/voices', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
+    @app.route('/api/tts/voices', methods=['GET'])
     def api_tts_voices():
         """列出所有可用的中文语音"""
         print("=" * 60)
@@ -397,7 +415,7 @@ def register_tts_routes(app):
             print(f"[ERROR] ❌ 获取语音列表失败: {e}")
             return jsonify({'success': False, 'message': f'获取语音列表失败: {str(e)}'}), 500
 
-    @app.route('/api/tts/download/<filename>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
+    @app.route('/api/tts/download/<filename>', methods=['GET'])
     def api_tts_download(filename):
         """下载生成的音频文件"""
         print("=" * 60)
