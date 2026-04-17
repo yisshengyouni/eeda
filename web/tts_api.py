@@ -177,7 +177,7 @@ def _secure_filename(filename):
 def register_tts_routes(app):
     """将 TTS 路由注册到 Flask app"""
 
-    @app.route('/api/tts')
+    @app.route('/api/tts', methods=['GET', 'POST', 'OPTIONS'])
     def api_tts():
         """
         单文本转语音
@@ -256,7 +256,7 @@ def register_tts_routes(app):
             'message': 'TTS 生成成功'
         })
 
-    @app.route('/api/tts/merge')
+    @app.route('/api/tts/merge', methods=['GET', 'POST', 'OPTIONS'])
     def api_tts_merge():
         """
         多段语音合成并合并为一个音频文件
@@ -363,7 +363,7 @@ def register_tts_routes(app):
             'message': '语音合并成功'
         })
 
-    @app.route('/api/tts/voices', methods=['GET'])
+    @app.route('/api/tts/voices', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
     def api_tts_voices():
         """列出所有可用的中文语音"""
         print("=" * 60)
@@ -397,7 +397,7 @@ def register_tts_routes(app):
             print(f"[ERROR] ❌ 获取语音列表失败: {e}")
             return jsonify({'success': False, 'message': f'获取语音列表失败: {str(e)}'}), 500
 
-    @app.route('/api/tts/download/<filename>', methods=['GET'])
+    @app.route('/api/tts/download/<filename>', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
     def api_tts_download(filename):
         """下载生成的音频文件"""
         print("=" * 60)

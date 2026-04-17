@@ -17,6 +17,8 @@ from web.weixin_client import WeixinClient
 from web.weibo_client import WeiboClient
 from web.tts_api import register_tts_routes
 
+from flask_cors import CORS   
+
 # import eeda.const
 
 # eeda.const.MYSQL_DB      # 数据库名
@@ -30,7 +32,8 @@ from web.tts_api import register_tts_routes
 # sys.setdefaultencoding('utf8')
 
 
-app = Flask(__name__)
+app = Flask(__name__)                                                            
+CORS(app, resources={r"/api/*": {"origins": "*"}})  
 # app.config['SQLALCHEMY_DATABASE_URI'] = "mysql+pymysql://"+eeda.const.MYSQL_USER+":"+eeda.const.MYSQL_PASS+"@"+eeda.const.MYSQL_HOST+"/"+eeda.const.MYSQL_DB
 
 app.config[
