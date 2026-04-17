@@ -177,7 +177,7 @@ def _secure_filename(filename):
 def register_tts_routes(app):
     """将 TTS 路由注册到 Flask app"""
 
-    @app.route('/api/tts', methods=['POST','GET'])
+    @app.route('/api/tts')
     def api_tts():
         """
         单文本转语音
@@ -256,7 +256,7 @@ def register_tts_routes(app):
             'message': 'TTS 生成成功'
         })
 
-    @app.route('/api/tts/merge', methods=['POST'])
+    @app.route('/api/tts/merge')
     def api_tts_merge():
         """
         多段语音合成并合并为一个音频文件
