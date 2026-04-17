@@ -7,6 +7,7 @@ Edge TTS API 服务 - 语音合成与合并
   POST /api/tts/merge        - 多段语音合成并合并
   GET  /api/tts/voices       - 列出可用的中文语音
   GET  /api/tts/download/<filename> - 下载生成的音频文件
+  POST /api/tts/cache/clear  - 一键清除 TTS 缓存
 """
 
 import os
@@ -454,6 +455,33 @@ def register_tts_routes(app):
             },
             'message': '语音合并成功'
         })
+
+    @app.route('/api/tts/cache/clear', methods=['POST', 'DELETE'])
+    def api_tts_cache_clear():
+        """一键清除 TTS 缓存"""
+        print("=" * 60)
+        print("[INFO] 📥 收到清除缓存请求")
+
+        cleared = 0
+        freed_bytes = 0
+        try:
+            for f in CACHE_DIR.iterdir():
+                if f.is_file() and f.suffix == '.mp3':
+                    freed_bytes += f.stat().st_size
+                    f.unlink()
+                    cleared += 1
+            print(f"[INFO] ✅ 缓存已清除 - 删除 {cleared} 个文件, 释放 {freed_bytes} bytes")
+            return jsonify({
+                'success': True,
+                'data': {
+                    'cleared_files': cleared,
+                    'freed_bytes': freed_bytes
+                },
+                'message': f'已清除 {cleared} 个缓存文件，释放 {freed_bytes} bytes'
+            })
+        except Exception as e:
+            print(f"[ERROR] ❌ 清除缓存失败: {e}")
+            return jsonify({'success': False, 'message': f'清除缓存失败: {str(e)}'}), 500
 
     @app.route('/api/tts/voices', methods=['GET'])
     def api_tts_voices():
